@@ -26,7 +26,8 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 - **v1.1** — No words in the middle of the table
 - **v1.0** — First version: computer (3 levels) or 2 players
 
-## Tennis — v2.0
+## Tennis — v2.1
+- **v2.1** — Aim your shots: move the ring on the other side (touch, mouse or arrow keys)
 - **v2.0** — New physics engine: spin, curve, drag, net cords, momentum, shot types
 - **v1.0** — First version: computer (3 levels) or 2 players
 
