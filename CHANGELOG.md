@@ -26,7 +26,8 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 - **v1.1** — No words in the middle of the table
 - **v1.0** — First version: computer (3 levels) or 2 players
 
-## Tennis — v2.2
+## Tennis — v2.3
+- **v2.3** — Auto-run (on by default): your player runs to the ball, you just aim; simpler instructions
 - **v2.2** — Aim with the mouse: run with WASD or arrows, point where you want the ball to go, click to serve; brighter target and aim line
 - **v2.1** — Aim your shots: move the ring on the other side (touch, mouse or arrow keys)
 - **v2.0** — New physics engine: spin, curve, drag, net cords, momentum, shot types
