@@ -150,6 +150,8 @@
   .art.hippo .label span { color: #e4483f; display: block; font-size: 1.45em; margin-top: 2px; }
   .play.hippo { background: #5e9a92; color: #fff; box-shadow: 0 5px 0 #3f726c; }
 
+  .tags span.ver { background: var(--ink); color: var(--bg); margin-left: auto; }
+
   .soon { border: 2px dashed var(--line); border-radius: 22px; display: grid; place-items: center; text-align: center; padding: 30px; color: var(--muted); min-height: 220px; }
   .soon b { display: block; color: var(--ink); font-size: 20px; margin-bottom: 6px; }
 
@@ -324,7 +326,7 @@
   </div>
 </section>
 
-<footer>Arcade Blitz · Made with Claude · Saves stay on this device</footer>
+<footer><span id="hubVer">Arcade Blitz</span> · Made with Claude · Saves stay on this device</footer>
 
 <div id="player" role="dialog" aria-label="Game">
   <div id="bar">
@@ -341,9 +343,17 @@
   const GAME_URLS = {"blitz": "/games/blitz-arena.html", "cliff": "/games/cliff-dive.html", "hockey": "/games/air-hockey.html", "tennis": "/games/tennis.html", "bubble": "/games/bubble-shooter.html", "hippo": "/games/hippo-sled.html"};          // hosted version: each game is its own file
   const LIST = GAME_URLS || GAMES;
   const NAMES = { blitz: "BLITZ ARENA", cliff: "CLIFF DIVE", hockey: "AIR HOCKEY", tennis: "TENNIS", bubble: "BUBBLE SHOOTER", hippo: "HIPPO BABY SQUEAKY DOUBLE SLED" };
+  const VERSIONS = {"blitz": "1.12", "cliff": "1.2", "hockey": "1.1", "tennis": "2.0", "bubble": "1.0", "hippo": "1.4"};
+  const HUB = {"version": "1.2", "date": "Nov 24, 2026"};
   const $ = id => document.getElementById(id);
   const player = $("player");
   let frame = $("frame");
+  // Version tags on the cards and the hub's own version at the bottom
+  for (const b of document.querySelectorAll(".play[data-game]")) {
+    const v = VERSIONS[b.dataset.game], tags = b.closest(".game") && b.closest(".game").querySelector(".tags");
+    if (v && tags) { const el = document.createElement("span"); el.className = "ver"; el.textContent = "v" + v; tags.append(el); }
+  }
+  if (HUB.version) $("hubVer").textContent = `Arcade Blitz v${HUB.version} · published ${HUB.date}`;
 
   function open(id, push = true) {
     if (!LIST[id]) return;
@@ -351,7 +361,7 @@
     const f = frame.cloneNode(false); f.removeAttribute("srcdoc"); f.removeAttribute("src"); frame.replaceWith(f); frame = f;
     if (GAME_URLS) frame.src = GAME_URLS[id]; else frame.srcdoc = GAMES[id];
     frame.addEventListener("load", () => { try { frame.contentWindow.focus(); } catch (e) {} }, { once: true });
-    $("playing").textContent = NAMES[id];
+    $("playing").textContent = NAMES[id] + (VERSIONS[id] ? " · v" + VERSIONS[id] : "");
     player.classList.add("open"); document.body.classList.add("playing");
     if (push) { try { history.pushState({ game: id }, "", "#" + id); } catch (e) {} }
   }
