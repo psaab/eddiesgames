@@ -19,6 +19,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Tennis</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   :root {
     --bg: #0c2a22;
@@ -37,6 +38,7 @@
     font-family: "Avenir Next", "Avenir", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
   canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
   canvas:focus { outline: none; }
+  #c, #c3 { position: fixed; inset: 0; }
   .hidden { display: none !important; }
   button { font: inherit; color: inherit; cursor: pointer; }
   button:focus-visible { outline: 3px solid var(--ball); outline-offset: 2px; }
@@ -71,7 +73,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Tennis version 2.3" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Tennis v2.3</div>
+<div id="__ver" aria-label="Tennis version 3.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Tennis v3.0</div>
 <canvas id="c"></canvas>
 <div id="hud" class="hidden"><button id="pauseBtn" aria-label="Pause">II</button><button id="fsBtn" aria-label="Full screen">⛶</button></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -189,7 +191,7 @@
   // =====================================================================
   // Layout: portrait = net across the screen, landscape = net up and down
   // =====================================================================
-  let dpr = 1, landscape = false, s = 1, ox = 0, oy = 0;
+  let dpr = 1, landscape = false, s = 1, ox = 0, oy = 0, G3 = null, frameDt = 1 / 60;
   const WW = X1 - X0, LL = Y1 - Y0;
   function layout() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -198,14 +200,17 @@
     const pad = 24;
     if (landscape) { s = Math.min((innerWidth - pad) / LL, (innerHeight - pad) / WW); ox = (innerWidth - LL * s) / 2; oy = (innerHeight - WW * s) / 2; }
     else { s = Math.min((innerWidth - pad) / WW, (innerHeight - pad) / LL); ox = (innerWidth - WW * s) / 2; oy = (innerHeight - LL * s) / 2; }
+    if (G3) G3.fit();
   }
   addEventListener("resize", layout); layout();
   function courtTransform() {
     if (landscape) ctx.setTransform(0, s * dpr, s * dpr, 0, (ox - Y0 * s) * dpr, (oy - X0 * s) * dpr);
     else ctx.setTransform(s * dpr, 0, 0, -s * dpr, (ox - X0 * s) * dpr, (oy + Y1 * s) * dpr);
   }
-  const toCourt = (sx, sy) => landscape ? { x: (sy - oy) / s + X0, y: (sx - ox) / s + Y0 } : { x: (sx - ox) / s + X0, y: Y1 - (sy - oy) / s };
-  const toScreen = (x, y) => landscape ? { x: ox + (y - Y0) * s, y: oy + (x - X0) * s } : { x: ox + (x - X0) * s, y: oy + (Y1 - y) * s };
+  const toCourt = (sx, sy) => G3 ? G3.toCourt(sx, sy) : toCourt2(sx, sy);
+  const toScreen = (x, y) => G3 ? G3.toScreen(x, y) : toScreen2(x, y);
+  const toCourt2 = (sx, sy) => landscape ? { x: (sy - oy) / s + X0, y: (sx - ox) / s + Y0 } : { x: (sx - ox) / s + X0, y: Y1 - (sy - oy) / s };
+  const toScreen2 = (x, y) => landscape ? { x: ox + (y - Y0) * s, y: oy + (x - X0) * s } : { x: ox + (x - X0) * s, y: oy + (Y1 - y) * s };
 
   // =====================================================================
   // Input
@@ -269,7 +274,7 @@
   function keyVector(up, down, left, right) {
     const sx = (keys[right] ? 1 : 0) - (keys[left] ? 1 : 0), sy = (keys[down] ? 1 : 0) - (keys[up] ? 1 : 0);
     if (!sx && !sy) return null;
-    return landscape ? { x: sy, y: sx } : { x: sx, y: -sy };
+    return (G3 ? G3.view === "side" : landscape) ? { x: sy, y: sx } : { x: sx, y: -sy };
   }
 
   // =====================================================================
@@ -704,6 +709,13 @@
     }
   }
   function draw() {
+    if (G3) {
+      // 3D: the 2D canvas on top is just a clear layer (for touches) plus the point flash
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, innerWidth, innerHeight);
+      if (flash && t - flash.at < 0.9) { ctx.fillStyle = flash.who === 0 ? COLORS.p1 : COLORS.p2; ctx.globalAlpha = (1 - (t - flash.at) / 0.9) * 0.16; ctx.fillRect(0, 0, innerWidth, innerHeight); ctx.globalAlpha = 1; }
+      G3.render(frameDt);
+      return;
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0c2a22"; ctx.fillRect(0, 0, innerWidth, innerHeight);
     drawCourt();
@@ -718,6 +730,295 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = flash.who === 0 ? COLORS.p1 : COLORS.p2; ctx.globalAlpha = (1 - (t - flash.at) / 0.9) * 0.16;
       ctx.fillRect(0, 0, innerWidth, innerHeight); ctx.globalAlpha = 1;
+    }
+  }
+
+  // =====================================================================
+  // 3D view (three.js). If 3D can't start, the flat 2D view above is used instead.
+  // Court (x, y, z) -> world: X = (x - W/2)/100, Y = z/100, Z = (NET - y)/100
+  // =====================================================================
+  const S3 = 0.01;
+  const WX = x => (x - W / 2) * S3, WZ = y => (NET - y) * S3, WY = z => z * S3;
+  const lerp = (a, b, k) => a + (b - a) * k;
+  function init3D() {
+    if (!window.THREE || /flat/.test(location.search)) return null;
+    let cv = null;
+    try {
+      const T3 = window.THREE;
+      cv = document.createElement("canvas"); cv.id = "c3";
+      document.body.insertBefore(cv, canvas);
+      const renderer = new T3.WebGLRenderer({ canvas: cv, antialias: true, powerPreference: "high-performance" });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.shadowMap.enabled = true; renderer.shadowMap.type = T3.PCFSoftShadowMap;
+      renderer.outputEncoding = T3.sRGBEncoding;
+      const scene = new T3.Scene();
+      const camera = new T3.PerspectiveCamera(42, 1, 0.05, 200);
+      const srgb = tex => { tex.encoding = T3.sRGBEncoding; return tex; };
+      const canvasTex = (w, h, paint) => { const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h); return srgb(new T3.CanvasTexture(c)); };
+      const lin = hex => new T3.Color(hex).convertSRGBToLinear();
+      const lam = (color, extra) => new T3.MeshLambertMaterial(Object.assign({ color: lin(color) }, extra || {}));
+      const mesh = (geo, mat, cast, recv) => { const m = new T3.Mesh(geo, mat); m.castShadow = !!cast; m.receiveShadow = !!recv; return m; };
+      const flat = m => { m.rotation.x = -Math.PI / 2; return m; };
+
+      // sky + light
+      scene.background = canvasTex(4, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#5e9be0"); gr.addColorStop(0.6, "#a9cdf0"); gr.addColorStop(1, "#dcebf7"); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
+      scene.add(new T3.HemisphereLight(0xe8f2ff, 0x35553f, 0.75));
+      const sun = new T3.DirectionalLight(0xffffff, 0.85);
+      sun.position.set(-5, 11, 4); sun.castShadow = true;
+      sun.shadow.mapSize.set(1024, 1024);
+      Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 9, bottom: -9, near: 1, far: 30 });
+      sun.shadow.bias = -0.0006;
+      scene.add(sun); scene.add(sun.target);
+
+      // ground, court and lines (drawn exactly where the physics thinks they are)
+      const ground = flat(mesh(new T3.PlaneGeometry(60, 60), lam(0x2d6a45), false, true)); ground.position.y = -0.003; scene.add(ground);
+      const courtTex = canvasTex(1024, 2048, (g, cw, ch) => {
+        const kx = cw / (X1 - X0), ky = ch / (Y1 - Y0), px = x => (x - X0) * kx, py = y => (Y1 - y) * ky;
+        g.fillStyle = "#2f7d57"; g.fillRect(0, 0, cw, ch);
+        g.fillStyle = "#2b66b2"; g.fillRect(px(-40), py(L + 60), (W + 80) * kx, (L + 120) * ky);
+        for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.03})`; g.fillRect(Math.random() * cw, Math.random() * ch, 2, 2); }
+        g.fillStyle = "#f5f7fa";
+        const hl = (x1, x2, y) => g.fillRect(px(x1) - 2.5 * kx, py(y) - 2.5 * ky, (x2 - x1 + 5) * kx, 5 * ky);
+        const vl = (x, y1, y2) => g.fillRect(px(x) - 2.5 * kx, py(y2), 5 * kx, (y2 - y1) * ky);
+        hl(0, W, 0); hl(0, W, L); vl(0, 0, L); vl(W, 0, L);
+        hl(0, W, NET - SERVICE); hl(0, W, NET + SERVICE); vl(W / 2, NET - SERVICE, NET + SERVICE);
+        vl(W / 2, 0, 14); vl(W / 2, L - 14, L);
+      });
+      courtTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      const court = flat(mesh(new T3.PlaneGeometry((X1 - X0) * S3, (Y1 - Y0) * S3), new T3.MeshLambertMaterial({ map: courtTex }), false, true));
+      court.position.set(WX((X0 + X1) / 2), 0, WZ((Y0 + Y1) / 2)); scene.add(court);
+
+      // stadium: low walls and stands full of fans
+      const crowd = canvasTex(512, 128, (g, w, h) => {
+        g.fillStyle = "#3a4250"; g.fillRect(0, 0, w, h);
+        const cols = ["#e74c3c", "#3498db", "#f1c40f", "#ecf0f1", "#2ecc71", "#9b59b6", "#e67e22", "#1abc9c", "#34495e"];
+        for (let row = 0; row < 4; row++) for (let x = 6; x < w; x += 12) {
+          if (Math.random() < 0.12) continue;
+          const y = 18 + row * 30 + (Math.random() - 0.5) * 3;
+          g.fillStyle = cols[(Math.random() * cols.length) | 0]; g.fillRect(x - 5, y, 10, 12);
+          g.fillStyle = ["#f1c27d", "#e0ac69", "#c68642", "#8d5524"][(Math.random() * 4) | 0]; g.beginPath(); g.arc(x, y - 3, 4, 0, 7); g.fill();
+        }
+      });
+      crowd.wrapS = T3.RepeatWrapping;
+      const wallMat = lam(0x1d4a37), seatTop = lam(0x59616e);
+      function stand(cx, cz, len, rotY) {
+        const grp = new T3.Group(); grp.position.set(cx, 0, cz); grp.rotation.y = rotY;
+        const wall = mesh(new T3.BoxGeometry(len, 0.45, 0.08), wallMat, false, true); wall.position.set(0, 0.225, 0); grp.add(wall);
+        const tex = crowd.clone(); tex.needsUpdate = true; tex.repeat.set(len / 3, 1);
+        const top = crowd.clone(); top.needsUpdate = true; top.repeat.set(len / 3, 0.35);
+        const front = new T3.MeshLambertMaterial({ map: tex }), seats = new T3.MeshLambertMaterial({ map: top, color: lin(0xb8bcc4) });
+        for (let i = 0; i < 6; i++) {
+          const tier = mesh(new T3.BoxGeometry(len, 0.3, 0.42), [seatTop, seatTop, seats, seatTop, front, seatTop], false, false);
+          tier.position.set(0, 0.45 + 0.15 + i * 0.3, -0.3 - i * 0.42); grp.add(tier);
+        }
+        scene.add(grp); return grp;
+      }
+      const back = (Y1 - Y0) * S3 / 2 + 0.25, sideX = (X1 - X0) * S3 / 2 + 0.25;
+      const stands = {
+        far: stand(0, WZ(NET) - back, (X1 - X0) * S3 + 6, 0),
+        near: stand(0, WZ(NET) + back, (X1 - X0) * S3 + 6, Math.PI),     // hidden when the camera is behind you
+        left: stand(-sideX, 0, (Y1 - Y0) * S3 + 1, Math.PI / 2),
+        right: stand(sideX, 0, (Y1 - Y0) * S3 + 1, -Math.PI / 2),         // hidden for the sideline TV view
+      };
+      // umpire chair by the net
+      const chair = new T3.Group(); chair.position.set(WX(-70), 0, 0);
+      for (const [dx, dz] of [[-0.08, -0.08], [0.08, -0.08], [-0.08, 0.08], [0.08, 0.08]]) { const leg = mesh(new T3.CylinderGeometry(0.015, 0.015, 0.75, 6), lam(0x2b3340), true); leg.position.set(dx, 0.375, dz); chair.add(leg); }
+      const seat = mesh(new T3.BoxGeometry(0.26, 0.04, 0.24), lam(0x2b3340), true); seat.position.y = 0.76; chair.add(seat);
+      const ump = mesh(new T3.CylinderGeometry(0.07, 0.08, 0.22, 10), lam(0x1b2a4a), true); ump.position.y = 0.9; chair.add(ump);
+      const umpHead = mesh(new T3.SphereGeometry(0.055, 12, 10), lam(0xe0ac69), true); umpHead.position.y = 1.06; chair.add(umpHead);
+      scene.add(chair);
+
+      // net: posts, mesh, white tape
+      const netW = (W + 76) * S3, netH = NET_H * S3;
+      for (const x of [-38, W + 38]) { const post = mesh(new T3.CylinderGeometry(0.025, 0.025, netH + 0.05, 10), lam(0x1c2230), true); post.position.set(WX(x), (netH + 0.05) / 2, 0); scene.add(post); }
+      const netTex = canvasTex(1024, 96, (g, w, h) => { g.clearRect(0, 0, w, h); g.strokeStyle = "rgba(20,24,30,0.85)"; g.lineWidth = 2; for (let x = 0; x <= w; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); } for (let y = 0; y <= h; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } });
+      const net = mesh(new T3.PlaneGeometry(netW, netH), new T3.MeshLambertMaterial({ map: netTex, transparent: true, side: T3.DoubleSide, depthWrite: false }), false, false);
+      net.position.set(WX(W / 2), netH / 2, 0); scene.add(net);
+      const tape = mesh(new T3.BoxGeometry(netW, 0.03, 0.012), lam(0xf4f4f4), true); tape.position.set(WX(W / 2), netH - 0.015, 0); scene.add(tape);
+      const strap = mesh(new T3.BoxGeometry(0.03, netH, 0.006), lam(0xf4f4f4)); strap.position.set(WX(W / 2), netH / 2, 0.004); scene.add(strap);
+
+      // players: legs that run, a body that turns, and an arm that swings the racket
+      function makePlayer(color) {
+        const g = new T3.Group(), skin = lam(0xe0ac69), shirt = lam(color), white = lam(0xf4f4f4), dark = lam(0x23262e);
+        const legGeo = new T3.CylinderGeometry(0.028, 0.023, 0.27, 8); legGeo.translate(0, -0.135, 0);
+        const legs = [-0.045, 0.045].map(x => {
+          const leg = mesh(legGeo, skin, true); leg.position.set(x, 0.29, 0);
+          const shoe = mesh(new T3.BoxGeometry(0.05, 0.035, 0.09), white, true); shoe.position.set(0, -0.26, -0.015); leg.add(shoe);
+          g.add(leg); return leg;
+        });
+        const shorts = mesh(new T3.CylinderGeometry(0.075, 0.082, 0.1, 12), white, true); shorts.position.y = 0.31; g.add(shorts);
+        const upper = new T3.Group(); upper.position.y = 0.36; g.add(upper);
+        const torso = mesh(new T3.CylinderGeometry(0.072, 0.085, 0.21, 12), shirt, true); torso.position.y = 0.1; upper.add(torso);
+        const head = mesh(new T3.SphereGeometry(0.058, 16, 12), skin, true); head.position.y = 0.27; upper.add(head);
+        const cap = mesh(new T3.SphereGeometry(0.061, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), shirt, true); cap.position.y = 0.275; upper.add(cap);
+        const visor = mesh(new T3.BoxGeometry(0.07, 0.008, 0.055), shirt, true); visor.position.set(0, 0.278, -0.075); upper.add(visor);
+        const offArm = new T3.Group(); offArm.position.set(-0.095, 0.18, 0); upper.add(offArm);
+        const oa = mesh(new T3.CylinderGeometry(0.019, 0.016, 0.21, 8), skin, true); oa.position.y = -0.1; offArm.add(oa); offArm.rotation.z = -0.25;
+        // racket arm points along +X at rest; rotating it around Y swings the racket
+        const arm = new T3.Group(); arm.position.set(0.095, 0.18, 0); upper.add(arm);
+        const armIn = new T3.Group(); arm.add(armIn); armIn.rotation.z = -0.4;
+        const ua = mesh(new T3.CylinderGeometry(0.019, 0.016, 0.2, 8), skin, true); ua.rotation.z = -Math.PI / 2; ua.position.x = 0.1; armIn.add(ua);
+        const handle = mesh(new T3.CylinderGeometry(0.011, 0.011, 0.13, 8), dark, true); handle.rotation.z = -Math.PI / 2; handle.position.x = 0.265; armIn.add(handle);
+        const frame = mesh(new T3.TorusGeometry(0.075, 0.009, 8, 24), lam(color), true); frame.scale.set(1.15, 0.9, 1); frame.position.x = 0.41; armIn.add(frame);
+        const strings = mesh(new T3.CircleGeometry(0.072, 20), new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: T3.DoubleSide })); strings.scale.set(1.15, 0.9, 1); strings.position.x = 0.41; armIn.add(strings);
+        g.scale.setScalar(1.2);
+        scene.add(g);
+        return { g, legs, upper, offArm, arm, armIn, phase: 0, armA: 0.9, twist: 0, side: 1 };
+      }
+      const P3 = [makePlayer(0x2e8fff), makePlayer(0xff4f9a)];
+
+      // ball, its shadow and spin trail
+      const ballTex = canvasTex(128, 64, (g, w, h) => { g.fillStyle = "#d7ff3f"; g.fillRect(0, 0, w, h); g.strokeStyle = "#ffffff"; g.lineWidth = 5; g.beginPath(); for (let x = 0; x <= w; x++) g.lineTo(x, h / 2 + Math.sin(x / w * Math.PI * 4) * h * 0.28); g.stroke(); });
+      const BR = 0.04;
+      const ball3 = mesh(new T3.SphereGeometry(BR, 18, 14), new T3.MeshLambertMaterial({ map: ballTex, emissive: lin(0x3c4a00) }), true); scene.add(ball3);
+      const shadowMat = new T3.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
+      const ballShadow = flat(mesh(new T3.CircleGeometry(0.05, 20), shadowMat)); scene.add(ballShadow);
+      const trail3 = [];
+      for (let i = 0; i < 10; i++) { const m = mesh(new T3.SphereGeometry(BR * 0.8, 8, 6), new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })); scene.add(m); trail3.push(m); }
+      const trailPts = [];
+
+      // aim target(s), dotted aim line, bounce marks, out marks, sparks
+      const decal = (geo, color, op) => { const m = flat(mesh(geo, new T3.MeshBasicMaterial({ color: lin(color), transparent: true, opacity: op, depthWrite: false }))); return m; };
+      function makeTarget(color) {
+        const g = new T3.Group();
+        g.add(decal(new T3.RingGeometry(0.22, 0.27, 40), 0x000000, 0.4));
+        g.add(decal(new T3.RingGeometry(0.18, 0.225, 40), 0xffffff, 1));
+        g.add(decal(new T3.CircleGeometry(0.18, 40), color, 0.55));
+        const c1 = decal(new T3.PlaneGeometry(0.2, 0.03), 0xffffff, 1), c2 = decal(new T3.PlaneGeometry(0.03, 0.2), 0xffffff, 1);
+        c1.position.y = c2.position.y = 0.001; g.add(c1); g.add(c2);
+        scene.add(g); return g;
+      }
+      const targets = [makeTarget(0x3aa0ff), makeTarget(0xff4f9a)];
+      const dashes = [0, 1].map(() => { const arr = []; for (let i = 0; i < 40; i++) { const d = new T3.Group(); d.add(decal(new T3.PlaneGeometry(0.1, 0.03), 0xffffff, 0.5)); scene.add(d); arr.push(d); } return arr; });
+      const bounceDecals = []; for (let i = 0; i < 8; i++) { const m = decal(new T3.CircleGeometry(0.07, 20), 0xffffff, 0); m.scale.set(1, 0.6, 1); scene.add(m); bounceDecals.push(m); }
+      const outDecals = []; for (let i = 0; i < 4; i++) { const g = new T3.Group(); const a = decal(new T3.PlaneGeometry(0.32, 0.05), 0xff5050, 0), b = decal(new T3.PlaneGeometry(0.32, 0.05), 0xff5050, 0); a.rotation.z = Math.PI / 4; b.rotation.z = -Math.PI / 4; g.add(a); g.add(b); g.userData.parts = [a, b]; scene.add(g); outDecals.push(g); }
+      const sparkMeshes = []; for (let i = 0; i < 40; i++) { const m = mesh(new T3.BoxGeometry(0.035, 0.035, 0.035), new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true })); m.visible = false; scene.add(m); sparkMeshes.push(m); }
+
+      // scoreboard (top left corner)
+      const board = document.createElement("div"); board.id = "board3";
+      board.style.cssText = "position:fixed;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));display:flex;gap:6px;font:900 italic 20px/1 'Avenir Next',system-ui,sans-serif;pointer-events:none";
+      document.body.appendChild(board);
+      let boardKey = "";
+
+      // camera: behind your player (1 player) or a sideline TV view (2 players)
+      let view = "", fitKey = "";
+      const ray = new T3.Raycaster(), ndc = new T3.Vector2(), v3 = new T3.Vector3(), camTarget = new T3.Vector3();
+      function fit() {
+        const w = innerWidth, h = innerHeight;
+        renderer.setSize(w, h, false); camera.aspect = w / h;
+        view = save.mode === 2 ? "side" : "behind";
+        stands.near.visible = view !== "behind"; stands.right.visible = view !== "side";
+        fitKey = view + w + "x" + h;
+        let dir, pts;
+        if (view === "behind") {
+          camera.fov = 44; camTarget.set(0, 0, WZ(NET + 120));
+          dir = new T3.Vector3(0, Math.sin(0.42), Math.cos(0.42));
+          pts = [[-15, L + 20], [W + 15, L + 20], [-30, -10], [W + 30, -10], [W / 2, -110], [-30, NET], [W + 30, NET]];
+        } else {
+          camera.fov = 40; camTarget.set(0, 0, 0);
+          dir = new T3.Vector3(Math.cos(0.95), Math.sin(0.95), 0);
+          pts = [[-20, -110], [W + 20, -110], [-20, L + 110], [W + 20, L + 110]];
+        }
+        camera.updateProjectionMatrix();
+        let lo = 2, hi = 80;
+        for (let i = 0; i < 30; i++) {
+          const d = (lo + hi) / 2;
+          camera.position.copy(camTarget).addScaledVector(dir, d); camera.lookAt(camTarget); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
+          const ok = pts.every(([x, y]) => { v3.set(WX(x), 0, WZ(y)).project(camera); return Math.abs(v3.x) <= 0.94 && v3.y >= -0.94 && v3.y <= 0.8 && v3.z < 1; });
+          if (ok) hi = d; else lo = d;
+        }
+        camera.position.copy(camTarget).addScaledVector(dir, hi); camera.lookAt(camTarget); camera.updateMatrixWorld();
+      }
+      function toScreen(x, y, z = 0) { v3.set(WX(x), WY(z), WZ(y)).project(camera); return { x: (v3.x + 1) / 2 * innerWidth, y: (1 - v3.y) / 2 * innerHeight }; }
+      function toCourt(sx, sy) {
+        ndc.set(sx / innerWidth * 2 - 1, -(sy / innerHeight) * 2 + 1);
+        ray.setFromCamera(ndc, camera);
+        const o = ray.ray.origin, d = ray.ray.direction.clone();
+        if (d.y > -0.02) d.y = -0.02;                                   // pointing at the sky: aim far away
+        const k = -o.y / d.y, X = o.x + d.x * k, Z = o.z + d.z * k;
+        return { x: X / S3 + W / 2, y: NET - Z / S3 };
+      }
+
+      function posePlayer(i, dt) {
+        const p = players[i], m = P3[i];
+        m.g.position.set(WX(p.x), 0, WZ(p.y));
+        const base = i === 0 ? 0 : Math.PI;
+        // turn a little toward the ball
+        const dx = WX(ball.x) - m.g.position.x, dz = WZ(ball.y) - m.g.position.z;
+        let want = Math.atan2(-dx, -dz) - base; want = Math.atan2(Math.sin(want), Math.cos(want));
+        m.g.rotation.y = base + clamp(want, -0.9, 0.9) * 0.45;
+        // running legs
+        const sp = Math.hypot(p.vx, p.vy), amp = Math.min(1, sp / 260) * 0.75;
+        m.phase += dt * (3 + sp / 35);
+        m.legs[0].rotation.x = Math.sin(m.phase) * amp; m.legs[1].rotation.x = -Math.sin(m.phase) * amp;
+        m.offArm.rotation.x = -Math.sin(m.phase) * amp * 0.7;
+        m.g.position.y = Math.abs(Math.sin(m.phase)) * amp * 0.024;
+        // forehand on your right, backhand on your left
+        const right = (ball.x - p.x) * (i === 0 ? 1 : -1) >= 0 ? 1 : -1;
+        const incoming = ball.live && ball.lastHitter !== i && ((i === 0) === (ball.y < NET + 200));
+        if (p.swing > 0.4) m.side = right;
+        const S = m.side, dist = Math.hypot(ball.x - p.x, ball.y - p.y);
+        let arm, twist;
+        if (p.swing < 0.35) {
+          const e = 1 - Math.pow(1 - p.swing / 0.35, 2);
+          arm = S > 0 ? lerp(0.1, 2.0, e) : lerp(2.8, 0.4, e); twist = S > 0 ? lerp(-0.3, 0.55, e) : lerp(0.35, -0.55, e);
+          m.armA = arm; m.twist = twist;
+        } else {
+          const w = incoming ? clamp(1 - (dist - 55) / 150, 0, 1) : 0;
+          arm = S > 0 ? lerp(0.9, -1.35, w) : lerp(0.9, 3.9, w); twist = S > 0 ? -0.75 * w : 0.75 * w;
+          const k = Math.min(1, dt * 14); m.armA += (arm - m.armA) * k; m.twist += (twist - m.twist) * k;
+        }
+        m.arm.rotation.y = m.armA; m.upper.rotation.y = m.twist;
+        const overhead = incoming && ball.z > HIT_H && dist < 160;
+        m.armIn.rotation.z += ((overhead ? 0.9 : -0.4) - m.armIn.rotation.z) * Math.min(1, dt * 10);
+      }
+
+      function render(dt) {
+        if (fitKey !== (save.mode === 2 ? "side" : "behind") + innerWidth + "x" + innerHeight) fit();
+        posePlayer(0, dt); posePlayer(1, dt);
+        // ball
+        const bx = WX(ball.x), by = WY(ball.z) + BR, bz = WZ(ball.y);
+        ball3.position.set(bx, by, bz); ball3.rotation.x = ball.rot || 0;
+        ballShadow.position.set(bx, 0.004, bz);
+        const sc = 1 + ball.z * 0.004; ballShadow.scale.set(sc, sc, 1); shadowMat.opacity = Math.max(0.12, 0.4 - ball.z * 0.0018);
+        if (!ball.held) { trailPts.push([bx, by, bz]); if (trailPts.length > 10) trailPts.shift(); } else trailPts.length = 0;
+        const col = ball.spin > 0.15 ? 0xff9a3c : ball.spin < -0.15 ? 0x5aaaff : 0xffffff;
+        trail3.forEach((m, k) => { const pt = trailPts[k]; m.visible = !!pt && k < trailPts.length - 1; if (!m.visible) return; m.position.set(pt[0], pt[1], pt[2]); m.material.color.setHex(col).convertSRGBToLinear(); m.material.opacity = (k / trailPts.length) * 0.4; const s2 = 0.4 + 0.6 * k / trailPts.length; m.scale.set(s2, s2, s2); });
+        // aim targets and dotted lines
+        const showAim = state === "play" || state === "pause";
+        for (const who of [0, 1]) {
+          const on = showAim && (who === 0 || save.mode === 2), tg = targets[who], a = aim[who];
+          tg.visible = on;
+          const pulse = 1 + Math.sin(t * 5) * 0.08;
+          if (on) { tg.position.set(WX(a.x), 0.006, WZ(a.y)); tg.scale.set(pulse, 1, pulse); }
+          const p = players[who], x0 = WX(p.x), z0 = WZ(p.y), x1 = WX(a.x), z1 = WZ(a.y), len = Math.hypot(x1 - x0, z1 - z0), ang = Math.atan2(-(z1 - z0), x1 - x0);
+          dashes[who].forEach((d, k) => {
+            const f = (k * 0.2 + (t * 0.3) % 0.2) / Math.max(0.01, len);
+            d.visible = on && f < 1 && f * len > 0.25 && (1 - f) * len > 0.3;
+            if (d.visible) { d.position.set(lerp(x0, x1, f), 0.005, lerp(z0, z1, f)); d.rotation.y = ang; }
+          });
+        }
+        // bounce marks and out marks
+        bounceDecals.forEach((m, k) => { const b = bounces[bounces.length - 1 - k]; const op = b ? Math.max(0, 1 - (t - b.at) / 1.4) * 0.5 : 0; m.visible = op > 0; if (m.visible) { m.material.opacity = op; m.position.set(WX(b.x), 0.003, WZ(b.y)); } });
+        outDecals.forEach((g, k) => { const o = marks[marks.length - 1 - k]; const op = o ? Math.max(0, 1 - (t - o.at) / 2.5) : 0; g.visible = op > 0; if (g.visible) { g.position.set(WX(o.x), 0.005, WZ(o.y)); g.userData.parts.forEach(pp => pp.material.opacity = op); } });
+        sparkMeshes.forEach((m, k) => { const s2 = sparks[k]; m.visible = !!s2; if (!s2) return; m.position.set(WX(s2.x), 0.25 + s2.life * 0.6, WZ(s2.y)); m.material.color.set(s2.color).convertSRGBToLinear(); m.material.opacity = Math.max(0, 1 - s2.life / s2.max); });
+        // scoreboard
+        const names = save.mode === 2 ? ["BLUE", "PINK"] : ["YOU", "CPU"];
+        const key = score.join("-") + save.mode + state;
+        if (key !== boardKey) {
+          boardKey = key;
+          board.style.display = state === "play" || state === "pause" ? "flex" : "none";
+          board.innerHTML = [0, 1].map(w => `<span style="background:rgba(8,30,24,0.85);border:2px solid ${w ? "#ff4f9a" : "#3aa0ff"};border-radius:12px;padding:7px 11px;color:#fff"><span style="color:${w ? "#ff4f9a" : "#3aa0ff"};font-size:13px;letter-spacing:1px;margin-right:7px">${names[w]}</span>${score[w]}</span>`).join("");
+        }
+        renderer.render(scene, camera);
+      }
+      fit();
+      renderer.render(scene, camera);
+      return { render, fit, toScreen, toCourt, get view() { return view; } };
+    } catch (e) {
+      if (cv) cv.remove();
+      console.warn("3D view unavailable, using 2D", e);
+      return null;
     }
   }
 
@@ -817,7 +1118,7 @@
   // =====================================================================
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
+    const dt = Math.min(1 / 30, (now - last) / 1000); last = now; frameDt = dt;
     update(dt);
     for (let i = sparks.length - 1; i >= 0; i--) {
       const sp = sparks[i]; sp.life += dt; sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vx *= 0.9; sp.vy *= 0.9;
@@ -826,6 +1127,9 @@
     draw();
     requestAnimationFrame(frame);
   }
+  G3 = init3D();
+  layout();
+  if (/debug/.test(location.search)) window.__tn = { players, ball, aim, save, toScreen, toCourt, state: () => state, score: () => score, three: () => !!G3, view: () => G3 && G3.view };
   renderMenu();
   restore();
   placeForServe();

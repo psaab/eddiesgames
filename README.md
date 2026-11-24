@@ -9,7 +9,7 @@ Free games you can play right in your browser — on a phone, tablet or computer
 | Blitz Arena | `games/blitz-arena.html` | 3D arena shooter. Earn coins, buy guns, bows and blades, climb onto roofs. Free-for-All or Gun Game. |
 | Cliff Dive | `games/cliff-dive.html` | Run off the cliff, flip and twist, and straighten out for a clean entry. Three judges score every dive. |
 | Air Hockey | `games/air-hockey.html` | Play the computer (Easy, Medium, Hard) or a friend on the same screen. First to 7. |
-| Tennis | `games/tennis.html` | Top-down tennis against the computer or a friend. Hit with the edge of the racket to aim. |
+| Tennis | `games/tennis.html` | 3D tennis in a stadium against the computer or a friend. Auto-run, point to aim, real spin and bounces. |
 | Bubble Shooter | `games/bubble-shooter.html` | Bank shots off the walls and match 3 or more to pop them. |
 | Hippo Baby Squeaky Double Sled | `games/hippo-sled.html` | Sled down a snowy mountain as Hippo Baby, Squeaky, or both on a double sled. Tap to jump, hold to flip. |
 

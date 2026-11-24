@@ -2,7 +2,8 @@
 
 Every game shows its version in the bottom corner, and the hub shows its own version at the bottom of the page.
 
-## Arcade Blitz — v1.2
+## Arcade Blitz — v1.3
+- **v1.3** — Tennis is now 3D
 - **v1.2** — Version numbers on every game, the hub and a changelog
 - **v1.1** — Installable app (Add to Home Screen), offline play, hosted on Vercel
 - **v1.0** — Arcade Blitz home page with an idea box
@@ -26,7 +27,8 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 - **v1.1** — No words in the middle of the table
 - **v1.0** — First version: computer (3 levels) or 2 players
 
-## Tennis — v2.3
+## Tennis — v3.0
+- **v3.0** — 3D: stadium with crowd, animated players that run and swing, ball shadow, TV cameras (flat view as a backup)
 - **v2.3** — Auto-run (on by default): your player runs to the ball, you just aim; simpler instructions
 - **v2.2** — Aim with the mouse: run with WASD or arrows, point where you want the ball to go, click to serve; brighter target and aim line
 - **v2.1** — Aim your shots: move the ring on the other side (touch, mouse or arrow keys)
