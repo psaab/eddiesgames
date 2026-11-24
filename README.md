@@ -12,6 +12,7 @@ Free games you can play right in your browser — on a phone, tablet or computer
 | Tennis | `games/tennis.html` | 3D tennis in a stadium against the computer or a friend. Auto-run, point to aim, real spin and bounces. |
 | Badminton | `games/badminton.html` | 3D badminton in an indoor hall: real shuttlecock flight, clears, drops and jump smashes. |
 | Baseball | `games/baseball.html` | 3D batting: Home Run Derby or 3 Innings against fastballs, curves, changeups and sliders. |
+| Ski Northstar | `games/ski.html` | 3D skiing on Northstar California, with all lifts and runs placed from the trail map. Unofficial fan game. |
 | Drift | `games/drift.html` | 3D car drifting on a race circuit: tire smoke, skid marks, combos and a 90-second score attack. |
 | Bubble Shooter | `games/bubble-shooter.html` | Bank shots off the walls and match 3 or more to pop them. |
 | Hippo Baby Squeaky Double Sled | `games/hippo-sled.html` | Sled down a snowy mountain as Hippo Baby, Squeaky, or both on a double sled. Tap to jump, hold to flip. |

@@ -70,7 +70,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Drift version 1.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Drift v1.0</div>
+<div id="__ver" aria-label="Drift version 2.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Drift v2.0</div>
 <canvas id="c3" tabindex="0"></canvas>
 <div id="board" class="hidden"></div>
 <div id="touch" class="hidden">
@@ -300,60 +300,99 @@
     near = best; const p = pts[best]; return { i: best, p, off: (x - p.x) * p.nx + (z - p.z) * p.nz };
   }
   // ---------- car physics ----------
-  const A = 1.3, B = 1.3, IZ = 1.7, CF = 24, CR = 30, MU = 12;
+  // =====================================================================
+  // Car physics: a rear-wheel-drive car (1,300 kg) with real tires.
+  //  - tire grip builds with slip angle, peaks, then falls off when sliding (Pacejka curve)
+  //  - weight moves forward under braking, backward under power (more load = more grip)
+  //  - each tire's grip is shared between going/stopping and turning (friction circle):
+  //    spinning the rears with gas, or locking them with the handbrake, lets the back step out
+  //  - an engine with a torque curve and a 6-speed automatic gearbox
+  // =====================================================================
+  const M = 1300, IZ = 2100, A = 1.35, B = 1.25, WB = A + B, HCG = 0.52, RW = 0.33, MU = 1.0, MU_R = 1.1, GRAV = 9.81;   // a little more weight and wider tires at the back, like a real RWD car
+  const GEARS = [3.3, 2.15, 1.55, 1.2, 0.97, 0.8], FINAL = 3.7, IDLE = 950, REDLINE = 7400;
+  const torqueAt = rpm => 250 + 180 * Math.exp(-(((rpm - 4600) / 2400) ** 2));          // Nm, about 430 at 4,600 rpm
+  const eng = { gear: 1, rpm: IDLE, shiftT: 0, ax: 0, ay: 0, rearSpin: 0, screech: 0, throttle: 0, handT: 9 };
+  const pacejka = alpha => Math.sin(1.45 * Math.atan(9 * alpha));                       // peaks near 10°, slides at ~75%
   function stepCar(dt) {
-    const L = GAME.save;
-    const auto = L.autoGas;
-    const thr = input.brake ? 0 : (auto || input.gas ? 1 : 0), brk = input.brake ? 1 : 0;
+    const S = GAME.save, aids = S.aids !== false;
     const steerIn = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-    const spd = Math.hypot(car.vl, car.vt);
-    const maxSteer = 0.55 / (1 + spd / 14);
-    car.steer += (steerIn * maxSteer - car.steer) * Math.min(1, dt * (steerIn ? 4.5 : 7));
-    const off = nearest(car.x, car.z).off, grass = Math.abs(off) > HALF + 0.6;
-    // start a drift: handbrake while turning at speed
-    if (!car.drift && input.hand && spd > 9 && (steerIn || Math.abs(car.w) > 0.2)) { car.drift = true; car.turn = steerIn || Math.sign(car.w); car.exitT = 0; }
-    if (car.drift) {
-      // DRIFT: the car slides at an angle you control with the steering; travel curves into the corner
-      const along = steerIn * car.turn;                                   // +1 steering into the corner, -1 countersteering
-      car.exitT = along < -0.5 || input.brake ? car.exitT + dt : 0;
-      const beta = Math.atan2(car.vt, car.vl), phi = car.h + beta;
-      const bt = -car.turn * (0.5 + 0.25 * along + (input.hand ? 0.15 : 0)) * clamp(spd / 12, 0.5, 1);
-      const phiDot = car.turn * (0.45 + 0.55 * Math.max(0, along) - 0.25 * Math.max(0, -along)) * clamp(spd / 16, 0.45, 1.15);
-      let sp2 = spd + (thr * 8 * Math.max(0, 1 - spd / 48) - 2.2 * Math.abs(beta) - (input.hand ? 3 : 0) - 0.0028 * spd * spd - brk * 9 - (grass ? 0.8 * spd : 0)) * dt;
-      sp2 = Math.max(0, sp2);
-      const phiN = phi + phiDot * dt, hDes = phiN - bt;
-      let dh = Math.atan2(Math.sin(hDes - car.h), Math.cos(hDes - car.h));
-      car.w = clamp(dh * 5, -3.5, 3.5); car.h += car.w * dt;
-      const b2 = phiN - car.h; car.vl = sp2 * Math.cos(b2); car.vt = sp2 * Math.sin(b2);
-      car.steer = steerIn * maxSteer * 0.7;
-      car.slip = Math.abs(b2);
-      if (car.exitT > 0.4 || sp2 < 7) { car.drift = false; }
-    } else {
-    const d = car.steer, vl = car.vl, vt = car.vt, w = car.w;
-    const vx = Math.max(Math.abs(vl), 2) * Math.sign(vl || 1);
-    const mu = MU * (grass ? 0.6 : 1);
-    const af = Math.atan2(vt + w * A, Math.abs(vx)) - d * Math.sign(vx), ar = Math.atan2(vt - w * B, Math.abs(vx));
-    const rearMax = mu * 0.58;
-    const Ff = clamp(-CF * af, -mu * 0.5, mu * 0.5), Fr = clamp(-CR * ar, -rearMax, rearMax);
-    const engine = thr * 11.5 * Math.max(0, 1 - Math.max(0, vl) / 50);
-    const drag = 0.0028 * vl * Math.abs(vl) + 0.05 * vl + (grass ? 1.0 * vl : 0);
-    const braking = brk * 13 * Math.sign(vl) + (input.hand ? 2.5 * Math.sign(vl) : 0);
-    const Fx = engine - drag - (Math.abs(vl) > 0.3 ? braking : vl * 4) - Ff * Math.sin(d);
-    const Fy = Fr + Ff * Math.cos(d);
-    car.vl += (Fx + w * vt) * dt;
-    car.vt += (Fy - w * vl) * dt;
-    car.w += ((A * Ff * Math.cos(d) - B * Fr) / IZ - car.w * 0.35) * dt;
-    // stability assist: normal driving follows the steering
-    const wKin = vl * Math.tan(d) / (A + B);
-    car.w += (wKin - car.w) * Math.min(1, 5 * dt);
-    car.vt *= 1 - Math.min(1, 2.5 * dt);
-    if (spd < 1.5) { car.w *= 1 - dt * 6; car.vt *= 1 - dt * 6; }
-    car.slip = Math.abs(ar);
-    car.h += car.w * dt;
+    const off = nearest(car.x, car.z).off, grass = Math.abs(off) > HALF + 0.6, mu = MU * (grass ? 0.62 : 1);
+    const vl = car.vl, vt = car.vt, w = car.w, spd = Math.hypot(vl, vt);
+    const beta = Math.atan2(vt, Math.max(1, Math.abs(vl)));
+    eng.handT = input.hand ? 0 : eng.handT + dt;
+    const driftIntent = eng.handT < 2 || (Math.abs(beta) > 0.25 && eng.handT < 6);      // a drift you started with the handbrake
+    // steering: smooth, less lock at speed; with aids on, the wheels also point toward where you're sliding (countersteer helper)
+    const maxSteer = 0.62 / (1 + spd / 26);
+    let target = steerIn * maxSteer;
+    if (aids && spd > 5) target = clamp(target + beta * 0.6, -0.62, 0.62);
+    car.steer += (target - car.steer) * Math.min(1, dt * (steerIn ? 5 : 7));
+    const d = car.steer;
+    // pedals
+    let thr = input.brake ? 0 : (S.autoGas || input.gas ? 1 : 0);
+    const brk = input.brake && vl > 0.5 ? 1 : 0, reverse = input.brake && vl <= 0.5;
+    // engine and automatic gearbox
+    const wheelRpm = Math.abs(vl) / RW * 60 / (2 * Math.PI);
+    let rpm = Math.max(IDLE, wheelRpm * GEARS[eng.gear - 1] * FINAL * (1 + eng.rearSpin));
+    eng.shiftT -= dt;
+    if (eng.shiftT <= 0 && !reverse) {
+      if (rpm > 6900 && eng.gear < 6) { eng.gear++; eng.shiftT = 0.25; tone("square", 180, 90, 0.08, 0.04); }
+      else if (wheelRpm * GEARS[eng.gear - 1] * FINAL < 2600 && eng.gear > 1) { eng.gear--; eng.shiftT = 0.2; }
     }
+    rpm = clamp(rpm, IDLE, REDLINE); eng.rpm += (rpm - eng.rpm) * Math.min(1, dt * 12);
+    const cut = eng.shiftT > 0.1 ? 0 : 1;
+    eng.throttle += (thr * cut - eng.throttle) * Math.min(1, dt * 10);
+    let Fdrive = reverse ? -3200 : eng.throttle * torqueAt(eng.rpm) * GEARS[eng.gear - 1] * FINAL * 0.9 / RW;
+    if (eng.rpm >= REDLINE - 50 && Fdrive > 0) Fdrive *= 0.2;                                // rev limiter
+    // weight transfer: braking loads the front, power loads the rear
+    const shift = M * eng.ax * HCG / WB;
+    const Wf = Math.max(1500, M * GRAV * B / WB - shift), Wr = Math.max(1500, M * GRAV * A / WB + shift);
+    // slip angles at each axle
+    const vx = Math.sign(vl || 1) * Math.max(Math.abs(vl), 3);
+    const af = Math.atan2(vt + w * A, Math.abs(vx)) - d * Math.sign(vx), ar = Math.atan2(vt - w * B, Math.abs(vx));
+    // front tires: braking + turning share the grip
+    const fMax = mu * Wf, fBrake = brk * 0.92 * fMax;
+    const fLatCap = Math.sqrt(Math.max(0, fMax * fMax - fBrake * fBrake));
+    const Fyf = -fLatCap * pacejka(af);
+    // rear tires: drive / brake / handbrake + turning share the grip
+    const rMax = mu * MU_R * Wr;
+    let Fxr;
+    if (input.hand && Math.abs(vl) > 1) { Fxr = -Math.sign(vl) * rMax * 0.8; eng.rearSpin += (-0.6 - eng.rearSpin) * Math.min(1, dt * 12); }   // locked rears
+    else {
+      Fxr = Fdrive - brk * Math.sign(vl) * 0.72 * rMax;
+      if (aids && !driftIntent) {                                                              // traction + stability control
+        const latUse = clamp(Math.abs(eng.ay) / (mu * MU_R * GRAV * 0.95), 0, 1);           // full power in a straight line, less mid-corner
+        Fxr = Math.min(Fxr, Math.max(0.15, 0.88 * Math.sqrt(1 - latUse * latUse)) * rMax);
+        if (Math.abs(beta) > 0.12 || Math.abs(ar) > 0.14) Fxr = Math.min(Fxr, 0.15 * rMax);
+      } else if (aids && driftIntent && !input.hand && Fxr > 0 && spd > 6) {                  // drift assist: balance wheelspin to hold a 25-40° slide
+        const b2 = Math.abs(beta);
+        Fxr = b2 < 0.38 ? Math.max(Fxr, 0.97 * rMax) : b2 > 0.62 ? Math.min(Fxr, 0.12 * rMax) : Math.min(Math.max(Fxr, 0.8 * rMax), 0.94 * rMax);
+      }
+      const spin = Math.abs(Fxr) > 0.93 * rMax;
+      if (spin) Fxr = Math.sign(Fxr) * 0.93 * rMax;
+      eng.rearSpin += ((spin && Fxr > 0 ? clamp((Fdrive / rMax - 0.9) * 0.8, 0, 1.2) : 0) - eng.rearSpin) * Math.min(1, dt * 8);
+    }
+    let rLatCap = Math.sqrt(Math.max(0, rMax * rMax - Fxr * Fxr));
+    if (Math.abs(eng.rearSpin) > 0.05) rLatCap *= 0.85;                                     // spinning or locked tires slide sideways easily
+    const Fyr = -rLatCap * pacejka(ar);
+    // air drag, rolling resistance, grass
+    const drag = 0.42 * vl * Math.abs(vl) + 14 * vl + (grass ? 650 * vl : 0);
+    const fBrakeX = brk * Math.sign(vl) * fBrake;
+    const Fx = Fxr - fBrakeX * Math.cos(d) - Fyf * Math.sin(d) - drag - (reverse ? 0 : 0);
+    const Fy = Fyr + Fyf * Math.cos(d) - fBrakeX * Math.sin(d);
+    car.vl += (Fx / M + w * vt) * dt;
+    car.vt += (Fy / M - w * vl) * dt;
+    car.w += ((A * (Fyf * Math.cos(d) - fBrakeX * Math.sin(d)) - B * Fyr) / IZ) * dt;
+    if (aids && (Math.abs(beta) > 0.8 || (!driftIntent && Math.abs(beta) > 0.35))) {           // catches a spin
+      const toward = -Math.sign(beta) * Math.sign(car.w); if (toward < 0 || Math.abs(beta) > 0.8) car.w *= 1 - Math.min(1, 3.2 * dt); }
+    if (spd < 2) { car.w *= 1 - Math.min(1, 6 * dt); car.vt *= 1 - Math.min(1, 6 * dt); if (!thr && !reverse) car.vl *= 1 - Math.min(1, 2 * dt); }
+    eng.ax += (Fx / M - eng.ax) * Math.min(1, dt * 8); eng.ay += (Fy / M - eng.ay) * Math.min(1, dt * 8);
+    car.slip = Math.max(Math.abs(ar), Math.abs(af) * 0.6);
+    car.drift = spd > 8 && Math.abs(beta) > 0.2;
+    eng.screech = clamp((Math.abs(ar) - 0.12) * 3 + Math.abs(eng.rearSpin) * 0.8 + (Math.abs(af) - 0.16) * 1.5, 0, 1) * (spd > 3 ? 1 : 0);
+    car.h += car.w * dt;
     const fx = Math.sin(car.h), fz = Math.cos(car.h), rx = Math.cos(car.h), rz = -Math.sin(car.h);
     car.x += (fx * car.vl + rx * car.vt) * dt; car.z += (fz * car.vl + rz * car.vt) * dt;
-    car.wheelSpin += car.vl * dt / 0.34;
+    car.wheelSpin += car.vl * dt / 0.34 * (1 + Math.max(0, eng.rearSpin) * 2);
     // barriers: bounce off and lose the combo
     const n2 = nearest(car.x, car.z);
     if (Math.abs(n2.off) > BARRIER - 1.1) {
@@ -368,6 +407,26 @@
     }
     car.crashT += dt;
     return { grass, slip: car.slip, drifting: car.drift };
+  }
+  let snd = null;
+  function startSound() {
+    if (!actx || snd) return;
+    const o1 = actx.createOscillator(), o2 = actx.createOscillator(), f = actx.createBiquadFilter(), g = actx.createGain();
+    o1.type = "sawtooth"; o2.type = "square"; f.type = "lowpass"; f.frequency.value = 900; g.gain.value = 0;
+    o1.connect(f); o2.connect(f); f.connect(g).connect(actx.destination); o1.start(); o2.start();
+    const n = actx.createBufferSource(); n.buffer = noiseBuf; n.loop = true;
+    const nf = actx.createBiquadFilter(); nf.type = "bandpass"; nf.frequency.value = 1500; nf.Q.value = 3; const ng = actx.createGain(); ng.gain.value = 0;
+    n.connect(nf).connect(ng).connect(actx.destination); n.start();
+    snd = { o1, o2, f, g, ng, nf };
+  }
+  function updateSound(on) {
+    if (!snd) return;
+    const now = actx.currentTime, fr = eng.rpm / 60 * 2;                       // 4 cylinders: two pulses per turn
+    snd.o1.frequency.setTargetAtTime(fr, now, 0.03); snd.o2.frequency.setTargetAtTime(fr * 0.5, now, 0.03);
+    snd.f.frequency.setTargetAtTime(400 + eng.rpm * 0.22 + eng.throttle * 700, now, 0.05);
+    snd.g.gain.setTargetAtTime(on && soundOn ? 0.03 + 0.05 * eng.throttle : 0, now, 0.06);
+    snd.nf.frequency.setTargetAtTime(1300 + eng.screech * 500, now, 0.05);
+    snd.ng.gain.setTargetAtTime(on && soundOn ? eng.screech * 0.14 : 0, now, 0.05);
   }
   function crash() {
     noise("lowpass", 900, 120, 0.35, 0.45); tone("square", 120, 50, 0.25, 0.1);
@@ -490,11 +549,11 @@
 
   Object.assign(GAME, {
     saveKey: "drift3d-save",
-    save: { mode: "attack", car: 0, autoGas: true, sound: true, best: 0, bestCombo: 0 },
+    save: { mode: "attack", car: 0, autoGas: true, aids: true, sound: true, best: 0, bestCombo: 0 },
     persist() { store.set(this.saveKey, this.save); },
     load(d) {
       if (d.mode === "attack" || d.mode === "free") this.save.mode = d.mode; if ([0, 1, 2, 3].includes(d.car)) this.save.car = d.car;
-      if (typeof d.autoGas === "boolean") this.save.autoGas = d.autoGas; if (typeof d.sound === "boolean") this.save.sound = d.sound;
+      if (typeof d.autoGas === "boolean") this.save.autoGas = d.autoGas; if (typeof d.aids === "boolean") this.save.aids = d.aids; if (typeof d.sound === "boolean") this.save.sound = d.sound;
       this.save.best = d.best | 0; this.save.bestCombo = d.bestCombo | 0;
       if (V.bodyMat) V.bodyMat.color.copy(G.lin(CARS[this.save.car][1]));
     },
@@ -505,13 +564,15 @@
       o.appendChild(seg("Mode", "modeSeg", [["attack", "90-second Score"], ["free", "Free Drive"]], s.mode, v => { s.mode = v; this.persist(); this.renderMenu(); }));
       o.appendChild(seg("Car", "carSeg", CARS.map((c, i) => [i, c[0]]), s.car, v => { s.car = v; this.persist(); if (V.bodyMat) V.bodyMat.color.copy(G.lin(CARS[v][1])); this.renderMenu(); }));
       o.appendChild(seg("Gas", "gasSeg", [[true, "Automatic"], [false, "I'll press gas"]], s.autoGas, v => { s.autoGas = v; this.persist(); this.renderMenu(); }));
+      o.appendChild(seg("Driving aids", "aidSeg", [[true, "On"], [false, "Off (real)"]], s.aids !== false, v => { s.aids = v; this.persist(); this.renderMenu(); }));
       $("record").textContent = s.best ? `Best score: ${s.best.toLocaleString()}${s.bestCombo ? ` · Biggest drift: ${s.bestCombo.toLocaleString()}` : ""}` : "";
       $("menuSub").textContent = s.mode === "attack" ? "Slide the car sideways around the corners to score drift points. Keep drifting to build your combo, but don't crash! You have 90 seconds." : "Drive and drift around the track as long as you like.";
       $("help").innerHTML = `<p><b>Keyboard:</b> ◀ ▶ or A/D steer, ▲ or W gas, ▼ or S brake, <b>Space</b> = handbrake (drift!).</p>
         <p><b>iPad:</b> ◀ ▶ buttons on the left, DRIFT and BRAKE on the right${s.autoGas ? " (gas is automatic)" : ", plus GAS"}.</p>
-        <p><b>How to drift:</b> turn into a corner and press DRIFT (or Space) to throw the car sideways. Keep steering into the corner to stay sideways, steer the other way to straighten out. The longer the slide, the bigger the points and the multiplier (up to ×5). Hitting a barrier loses the combo. <b>P</b> pause · <b>F</b> full screen</p>`;
+        <p><b>How to drift:</b> brake, turn into the corner and tap DRIFT (handbrake) to kick the back out, then hold the gas to keep it sideways and steer the other way to control the angle. Lots of gas in a low gear spins the rear tires and slides the back out too. Driving aids help you catch slides; turn them off for the real thing. The longer the slide, the bigger the points and the multiplier (up to ×5). Hitting a barrier loses the combo. <b>P</b> pause · <b>F</b> full screen</p>`;
     },
     start() {
+      startSound(); Object.assign(eng, { gear: 1, rpm: IDLE, shiftT: 0, ax: 0, ay: 0, rearSpin: 0, screech: 0, throttle: 0, handT: 9 });
       t = 0; timeLeft = 90; score = 0; combo = 0; mult = 1; driftT = 0; calmT = 9; comboBest = 0;
       if (V.bodyMat) V.bodyMat.color.copy(G.lin(CARS[this.save.car][1]));
       V.skidN = 0; V.skidGeo.setDrawRange(0, 0); V.lastRear = null; placeCar(); readKeys();
@@ -538,12 +599,11 @@
       if (sliding && V.lastRear) { addSkid(V.lastRear[0], V.lastRear[1], rear[0], rear[1]); }
       V.lastRear = sliding ? rear.map(r => [...r]) : null;
       if (sliding) for (const r of rear) if (Math.random() < 0.6) { const s = V.smoke[V.smokeI++ % V.smoke.length]; s.life = 0; s.x = r[0]; s.z = r[1]; s.m.visible = true; }
-      // engine and tire sounds
-      if (actx && soundOn && Math.random() < dt * 14) tone("sawtooth", 60 + spd * 4.2 + (input.gas || this.save.autoGas ? 15 : 0), 55 + spd * 4, 0.07, 0.025);
-      if (sliding && Math.random() < dt * 12) noise("bandpass", 1800, 1200, 0.08, 0.06);
+      // (engine and tire sounds are continuous: see updateSound)
       if (this.save.mode === "attack") { timeLeft -= dt; if (timeLeft <= 0) { timeLeft = 0; bank(); return this.finish(); } }
       const kmh = Math.round(spd * 3.6);
-      board(this.save.mode === "attack" ? [{ label: "SCORE", value: score.toLocaleString(), color: "#ff8a1f" }, { label: "TIME", value: Math.ceil(timeLeft) }, { label: "KM/H", value: kmh }]
+      const gearPill = { label: "GEAR", value: car.vl < -0.5 ? "R" : eng.gear, color: eng.rpm > 6600 ? "#ff4f4f" : undefined };
+      board(this.save.mode === "attack" ? [{ label: "SCORE", value: score.toLocaleString(), color: "#ff8a1f" }, { label: "TIME", value: Math.ceil(timeLeft) }, { label: "KM/H", value: kmh }, gearPill, { label: "RPM", value: (Math.round(eng.rpm / 100) * 100).toLocaleString() }]
         : [{ label: "SCORE", value: score.toLocaleString(), color: "#ff8a1f" }, { label: "KM/H", value: kmh }, { label: "BEST", value: this.save.best.toLocaleString() }]);
       const c = $("combo");
       if (combo > 0) { c.textContent = `DRIFT ×${mult}  +${Math.round(combo * mult).toLocaleString()}`; c.style.opacity = 1; c.style.borderColor = ["#fff", "#fff", "#ffd23f", "#ff8a1f", "#ff4f4f", "#c86bff"][mult]; }
@@ -559,7 +619,10 @@
       if (!V.carG) return;
       const { T3 } = G;
       V.carG.position.set(car.x, 0, car.z); V.carG.rotation.y = car.h;
-      const roll = clamp(car.vt * 0.012, -0.08, 0.08); V.carG.rotation.z = -roll;
+      V.carG.rotation.order = "YXZ";
+      V.roll = lerp(V.roll || 0, clamp(eng.ay * 0.011, -0.09, 0.09), Math.min(1, dt * 6)); V.pitch = lerp(V.pitch || 0, clamp(-eng.ax * 0.008, -0.06, 0.06), Math.min(1, dt * 6));
+      V.carG.rotation.z = V.roll; V.carG.rotation.x = V.pitch;
+      updateSound(st === "play");
       V.wheels.forEach((w, i) => { w.wg.rotation.x = car.wheelSpin; if (i < 2) w.piv.rotation.y = car.steer; });
       V.tail.forEach(tl => tl.material.color.copy(G.lin(input.brake || input.hand ? 0xff2a2a : 0x7a0d0d)));
       for (const s of V.smoke) { if (s.life > 1.6) { s.m.visible = false; continue; } s.life += dt; const k = s.life / 1.6; s.m.position.set(s.x, 0.4 + k * 1.6, s.z); s.m.scale.setScalar(0.5 + k * 1.8); s.m.material.opacity = 0.32 * (1 - k); }
@@ -568,14 +631,16 @@
       let dx = fx, dz = fz;
       if (spd > 4) { const wx = fx * car.vl + Math.cos(car.h) * car.vt, wz = fz * car.vl - Math.sin(car.h) * car.vt, l = Math.hypot(wx, wz); dx = lerp(fx, wx / l, 0.45); dz = lerp(fz, wz / l, 0.45); const l2 = Math.hypot(dx, dz); dx /= l2; dz /= l2; }
       const portrait = innerHeight > innerWidth, back = portrait ? 12 : 9.5, up = portrait ? 5.2 : 4.0;
-      if (G.camera.fov !== (portrait ? 70 : 58)) { G.camera.fov = portrait ? 70 : 58; G.camera.updateProjectionMatrix(); }
+      const fov = (portrait ? 70 : 58) + Math.min(14, Math.hypot(car.vl, car.vt) * 0.22);
+      if (Math.abs(G.camera.fov - fov) > 0.2) { G.camera.fov = lerp(G.camera.fov, fov, Math.min(1, dt * 3)); G.camera.updateProjectionMatrix(); }
       V.tmp.set(car.x - dx * back, up, car.z - dz * back);
       V.camPos.lerp(V.tmp, Math.min(1, dt * 5)); V.camLook.lerp(V.tmp.set(car.x + dx * 6, 1.0, car.z + dz * 6), Math.min(1, dt * 8));
-      G.camera.position.copy(V.camPos); G.camera.lookAt(V.camLook);
+      const shake = st === "play" ? eng.screech * 0.08 + Math.min(0.03, Math.hypot(car.vl, car.vt) * 0.0006) : 0;
+      G.camera.position.copy(V.camPos).add(V.tmp.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake)); G.camera.lookAt(V.camLook);
       V.sun.position.set(car.x - 40, 60, car.z - 30); V.sun.target.position.set(car.x, 0, car.z);
     },
   });
-  if (DEBUG) window.__dr = { car, input, pts: () => pts, get score() { return score; }, get combo() { return combo; }, get mult() { return mult; }, stepCar, nearest };
+  if (DEBUG) window.__dr = { eng, car, input, pts: () => pts, get score() { return score; }, get combo() { return combo; }, get mult() { return mult; }, stepCar, nearest };
 
   // ---------- flow buttons ----------
   $("playBtn").addEventListener("click", startGame);

@@ -1,5 +1,5 @@
 // Arcade Blitz service worker: lets the games load offline and makes the site installable.
-const CACHE = "arcade-blitz-236a180816";
+const CACHE = "arcade-blitz-e7880a971f";
 const SHELL = [
   "/",
   "/index.html",
@@ -15,7 +15,8 @@ const SHELL = [
   "/games/hippo-sled.html",
   "/games/badminton.html",
   "/games/baseball.html",
-  "/games/drift.html"
+  "/games/drift.html",
+  "/games/ski.html"
 ];
 const CDN = "cdnjs.cloudflare.com";
 

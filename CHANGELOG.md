@@ -2,7 +2,8 @@
 
 Every game shows its version in the bottom corner, and the hub shows its own version at the bottom of the page.
 
-## Arcade Blitz — v1.4
+## Arcade Blitz — v1.5
+- **v1.5** — New: Ski Northstar 3D. Drift 2.0 with real driving physics
 - **v1.4** — Three new 3D games: Badminton, Baseball and Drift
 - **v1.3** — Tennis is now 3D
 - **v1.2** — Version numbers on every game, the hub and a changelog
@@ -15,7 +16,11 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 ## Baseball — v1.0
 - **v1.0** — First version: 3D ballpark, 4 pitch types, timing and placement batting, fielders, Home Run Derby and 3 Innings
 
-## Drift — v1.0
+## Ski Northstar — v1.0
+- **v1.0** — First version: Northstar's 14 lifts and 93 runs placed from the trail map, rideable lifts, trail map, runs-skied tracker
+
+## Drift — v2.0
+- **v2.0** — Real driving physics: tire grip curve, weight transfer, RWD wheelspin, 6-speed gearbox, engine and tire sound, body roll, driving aids
 - **v1.0** — First version: 3D circuit, tire grip physics with controllable drifts, smoke, skid marks, combos, touch buttons
 
 ## Blitz Arena — v1.12
