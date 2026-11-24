@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<script>
+/* Saving: use the host's storage when it has one (Claude preview); otherwise this browser's own storage. */
+(function () {
+  try { if (!window.storage && window.parent !== window && window.parent.storage) window.storage = window.parent.storage; } catch (e) {}
+  if (!window.storage) {
+    window.storage = {
+      get: async function (k) { try { var v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; } catch (e) { return null; } },
+      set: async function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} return { key: k, value: v }; }
+    };
+  }
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Bubble Shooter</title>
+<style>
+  :root {
+    --bg1: #2a1452;
+    --bg2: #0f0a2a;
+    --panel: rgba(20, 12, 48, 0.9);
+    --ink: #ffffff;
+    --muted: rgba(255, 255, 255, 0.7);
+    --pop: #ffd84a;
+    --pink: #ff5fa8;
+    --line: rgba(255, 255, 255, 0.16);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) { :root { --panel: rgba(20, 12, 48, 0.92); } }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink);
+    background: radial-gradient(ellipse at 50% 0%, var(--bg1), var(--bg2) 70%);
+    font-family: "Avenir Next", "Avenir", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  canvas:focus { outline: none; }
+  .hidden { display: none !important; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--pop); outline-offset: 2px; }
+
+  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 18px;
+    background: radial-gradient(ellipse at center, rgba(15, 10, 42, 0.55), rgba(15, 10, 42, 0.92)); }
+  .box { width: min(430px, 100%); display: flex; flex-direction: column; gap: 14px; text-align: center; max-height: 100%; overflow-y: auto; }
+  h1 { margin: 0; font-size: clamp(54px, 14vw, 88px); line-height: 0.86; font-weight: 900; letter-spacing: -2px; }
+  h1 .a { display: block; color: var(--pink); text-shadow: 0 5px 0 #8a1f58; }
+  h1 .b { display: block; color: var(--pop); text-shadow: 0 5px 0 #8a6a00; font-size: 0.62em; letter-spacing: 2px; margin-top: 6px; }
+  .sub { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.45; }
+  .seg { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px; gap: 4px; }
+  .seg button { flex: 1; border: 0; background: transparent; border-radius: 10px; padding: 11px 6px; font-weight: 800; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #1a0f3a; }
+  .label { margin: 2px 0 -6px; font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  .big { border: 0; border-radius: 14px; padding: 15px; font-size: 22px; font-weight: 900; color: #3a2a00; background: var(--pop); box-shadow: 0 5px 0 #8a6a00; }
+  .big:active { transform: translateY(4px); box-shadow: 0 1px 0 #8a6a00; }
+  .ghost { border: 2px solid var(--line); background: var(--panel); border-radius: 12px; padding: 11px; font-weight: 800; font-size: 15px; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  #best { font-size: 15px; color: var(--muted); }
+  #help { background: var(--panel); border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.5; text-align: left; }
+  #help p { margin: 0 0 6px; } #help p:last-child { margin: 0; }
+  #help b { color: var(--pop); }
+  #overTitle { font-size: clamp(40px, 10vw, 60px); font-weight: 900; line-height: 1; color: var(--pink); }
+  #overScore { font-size: 48px; font-weight: 900; color: var(--pop); line-height: 1; }
+  #overNote { font-size: 16px; color: var(--muted); }
+
+  #hud { position: fixed; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+  #scoreBox { background: var(--panel); border-radius: 12px; padding: 6px 12px; font-weight: 900; font-size: 22px; font-variant-numeric: tabular-nums; }
+  #scoreBox small { display: block; font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 1px; }
+  #hud .spacer { flex: 1; }
+  #hud button { pointer-events: auto; width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--panel); font-size: 17px; font-weight: 900; }
+  #toast { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); background: var(--panel); border: 2px solid var(--pop);
+    border-radius: 12px; padding: 9px 14px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity 0.25s; max-width: 92vw; text-align: center; z-index: 5; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="hidden">
+  <div id="scoreBox"><small>SCORE</small><span id="scoreNum">0</span></div>
+  <div id="bestBox" style="background:var(--panel);border-radius:12px;padding:6px 12px;font-weight:800;font-size:16px;font-variant-numeric:tabular-nums"><small style="display:block;font-size:11px;color:var(--muted);letter-spacing:1px">BEST</small><span id="bestNum">0</span></div>
+  <div class="spacer"></div>
+  <button id="pauseBtn" aria-label="Pause">II</button><button id="fsBtn" aria-label="Full screen">⛶</button>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="menu" class="screen">
+  <div class="box">
+    <h1><span class="a">BUBBLE</span><span class="b">SHOOTER</span></h1>
+    <p class="sub">Aim, bounce off the walls, and match 3 or more of the same color to pop them. Knock bubbles loose and they all fall for big points.</p>
+    <div class="label">Difficulty</div>
+    <div class="seg" id="diffSeg"><button data-diff="0">Easy</button><button data-diff="1">Medium</button><button data-diff="2">Hard</button></div>
+    <div id="best"></div>
+    <button class="big" id="playBtn">Play</button>
+    <div class="row"><button class="ghost" id="helpBtn">How to play</button><button class="ghost" id="soundBtn">Sound: on</button></div>
+    <button class="ghost" id="fsMenuBtn">⛶ Full screen</button>
+    <div id="help" class="hidden"></div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="box">
+    <h1 style="font-size:56px"><span class="a">PAUSED</span></h1>
+    <button class="big" id="resumeBtn">Resume</button>
+    <button class="ghost" id="quitBtn">Quit to menu</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="box">
+    <div id="overTitle">GAME OVER</div>
+    <div id="overScore">0</div>
+    <div id="overNote"></div>
+    <button class="big" id="againBtn">Play again</button>
+    <button class="ghost" id="menuBtn">Menu</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $("c"), ctx = canvas.getContext("2d");
+
+  // =====================================================================
+  // Board (board units). Odd-shifted hex rows hang from the ceiling at y = 0.
+  // =====================================================================
+  const R = 20, COLS = 11, W = COLS * 2 * R, ROWH = R * Math.sqrt(3);
+  const DEAD = 560, SHOOT_Y = 640, H = 690, SPEED = 1050;
+  const PALETTE = [
+    { fill: "#ff4d6d", dark: "#b3123a", mark: "●" },
+    { fill: "#ffd84a", dark: "#b38a00", mark: "▲" },
+    { fill: "#3ddc84", dark: "#138a4a", mark: "■" },
+    { fill: "#3aa0ff", dark: "#0b5bb3", mark: "◆" },
+    { fill: "#b36bff", dark: "#6a23b8", mark: "★" },
+    { fill: "#ff9a3c", dark: "#b35a00", mark: "✚" },
+  ];
+  const LEVELS = [
+    { name: "Easy", colors: 4, rows: 5, shotsPerRow: 8, guide: 3 },
+    { name: "Medium", colors: 5, rows: 6, shotsPerRow: 6, guide: 2 },
+    { name: "Hard", colors: 6, rows: 7, shotsPerRow: 5, guide: 1 },
+  ];
+
+  const save = { diff: 0, sound: true, best: [0, 0, 0] };
+  function persist() { try { const p = window.storage.set("bubble-save", JSON.stringify(save), false); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  async function restore() {
+    try {
+      const r = await window.storage.get("bubble-save", false);
+      if (r && r.value) {
+        const d = JSON.parse(r.value);
+        if ([0, 1, 2].includes(d.diff)) save.diff = d.diff;
+        if (typeof d.sound === "boolean") save.sound = d.sound;
+        if (Array.isArray(d.best) && d.best.length === 3) save.best = d.best.map(v => Math.max(0, v | 0));
+      }
+    } catch (e) {}
+    renderMenu();
+  }
+
+  // =====================================================================
+  // Grid
+  // =====================================================================
+  let grid = [], parity = 0;                         // grid[r][c] = color index or -1
+  const isOff = r => (r + parity) % 2 === 1;
+  const rowLen = r => isOff(r) ? COLS - 1 : COLS;
+  const cellX = (r, c) => R + c * 2 * R + (isOff(r) ? R : 0);
+  const cellY = r => R + r * ROWH;
+  function ensureRow(r) { while (grid.length <= r) { const i = grid.length; grid.push(new Array(rowLen(i)).fill(-1)); } }
+  function get(r, c) { return r >= 0 && r < grid.length && c >= 0 && c < grid[r].length ? grid[r][c] : -1; }
+  function neighbors(r, c) {
+    const d = isOff(r) ? [0, 1] : [-1, 0];
+    return [[r, c - 1], [r, c + 1], [r - 1, c + d[0]], [r - 1, c + d[1]], [r + 1, c + d[0]], [r + 1, c + d[1]]]
+      .filter(([rr, cc]) => rr >= 0 && cc >= 0 && cc < rowLen(rr));
+  }
+  function trimRows() { while (grid.length && grid[grid.length - 1].every(v => v < 0)) grid.pop(); }
+  function colorsOnBoard() {
+    const set = new Set(); for (const row of grid) for (const v of row) if (v >= 0) set.add(v);
+    return [...set];
+  }
+  const level = () => LEVELS[save.diff];
+  function randomColor() {
+    const on = colorsOnBoard();
+    const pool = on.length ? on : [...Array(level().colors).keys()];
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  function makeRow(len) {
+    const row = [];
+    for (let c = 0; c < len; c++) {
+      // a little clumping makes it feel like a real puzzle instead of noise
+      const prev = row[c - 1];
+      row.push(prev !== undefined && Math.random() < 0.35 ? prev : Math.floor(Math.random() * level().colors));
+    }
+    return row;
+  }
+  function pushRowFromTop() {
+    parity ^= 1;
+    grid.unshift(makeRow(rowLen(0)));
+    for (let r = 1; r < grid.length; r++) if (grid[r].length !== rowLen(r)) grid[r].length = rowLen(r);
+    shake = 0.25; rowSound();
+  }
+
+  // =====================================================================
+  // Game state
+  // =====================================================================
+  let state = "menu", score = 0, shots = 0, combo = 0, angle = -Math.PI / 2, current = 0, next = 1, flying = null, t = 0, shake = 0;
+  const effects = [], falling = [], floaters = [];
+  let pending = null;
+
+  function startGame() {
+    grid = []; parity = 0; score = 0; shots = 0; combo = 0; flying = null; pending = null;
+    effects.length = 0; falling.length = 0; floaters.length = 0;
+    for (let r = 0; r < level().rows; r++) { ensureRow(r); grid[r] = makeRow(rowLen(r)); }
+    current = randomColor(); next = randomColor();
+    angle = -Math.PI / 2;
+    state = "play"; show(null); $("hud").classList.remove("hidden"); updateHud(); focusGame();
+  }
+
+  // =====================================================================
+  // Layout
+  // =====================================================================
+  let dpr = 1, s = 1, ox = 0, oy = 0;
+  function layout() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    const top = 62, bottom = 10;
+    s = Math.min((innerWidth - 16) / W, (innerHeight - top - bottom) / H);
+    ox = (innerWidth - W * s) / 2; oy = top + (innerHeight - top - bottom - H * s) / 2;
+  }
+  addEventListener("resize", layout); layout();
+  const toBoard = (x, y) => ({ x: (x - ox) / s, y: (y - oy) / s });
+
+  // =====================================================================
+  // Aiming + shooting
+  // =====================================================================
+  const MIN_A = -Math.PI + 0.16, MAX_A = -0.16;
+  function aimAt(bx, by) {
+    const a = Math.atan2(by - SHOOT_Y, bx - W / 2);
+    angle = Math.max(MIN_A, Math.min(MAX_A, a > 0 ? (bx < W / 2 ? MIN_A : MAX_A) : a));
+  }
+  function shoot() {
+    if (state !== "play" || flying || pending) return;
+    flying = { x: W / 2, y: SHOOT_Y, vx: Math.cos(angle) * SPEED, vy: Math.sin(angle) * SPEED, color: current };
+    current = next; next = randomColor();
+    shots++;
+    shootSound();
+  }
+  function swap() { if (state !== "play" || flying) return; [current, next] = [next, current]; tick(); }
+
+  // Where would a shot go? Follow it through wall bounces until it touches a bubble or the ceiling.
+  function traceAim() {
+    const pts = [{ x: W / 2, y: SHOOT_Y }];
+    let x = W / 2, y = SHOOT_Y, vx = Math.cos(angle), vy = Math.sin(angle), bounces = 0;
+    for (let i = 0; i < 900; i++) {
+      x += vx * 4; y += vy * 4;
+      if (x < R) { x = R; vx = -vx; pts.push({ x, y }); if (++bounces > level().guide) break; }
+      if (x > W - R) { x = W - R; vx = -vx; pts.push({ x, y }); if (++bounces > level().guide) break; }
+      if (y <= R || hitsBubble(x, y)) { pts.push({ x, y }); return { pts, end: { x, y } }; }
+    }
+    pts.push({ x, y });
+    return { pts, end: null };
+  }
+  function hitsBubble(x, y) {
+    const r0 = Math.max(0, Math.floor((y - R) / ROWH) - 1), r1 = Math.min(grid.length - 1, r0 + 3);
+    for (let r = r0; r <= r1; r++) for (let c = 0; c < grid[r].length; c++)
+      if (grid[r][c] >= 0 && Math.hypot(cellX(r, c) - x, cellY(r) - y) < 2 * R * 0.86) return true;
+    return false;
+  }
+  function snapCell(x, y) {
+    const r0 = Math.max(0, Math.round((y - R) / ROWH));
+    let best = null, bestD = Infinity;
+    for (let r = Math.max(0, r0 - 1); r <= r0 + 1; r++) {
+      ensureRow(r);
+      for (let c = 0; c < rowLen(r); c++) {
+        if (grid[r][c] >= 0) continue;
+        const touching = r === 0 || neighbors(r, c).some(([rr, cc]) => get(rr, cc) >= 0);
+        if (!touching) continue;
+        const d = Math.hypot(cellX(r, c) - x, cellY(r) - y);
+        if (d < bestD) { bestD = d; best = { r, c }; }
+      }
+    }
+    return best;
+  }
+
+  function land(f) {
+    const cell = snapCell(f.x, f.y);
+    flying = null;
+    if (!cell) { trimRows(); return; }
+    grid[cell.r][cell.c] = f.color;
+    stickSound();
+    // Same-color group
+    const group = [], seen = new Set([cell.r + "," + cell.c]), stack = [[cell.r, cell.c]];
+    while (stack.length) {
+      const [r, c] = stack.pop(); group.push([r, c]);
+      for (const [rr, cc] of neighbors(r, c)) { const k = rr + "," + cc; if (!seen.has(k) && get(rr, cc) === f.color) { seen.add(k); stack.push([rr, cc]); } }
+    }
+    let gained = 0;
+    if (group.length >= 3) {
+      combo++;
+      group.forEach(([r, c], i) => { popEffect(cellX(r, c), cellY(r), grid[r][c], i); grid[r][c] = -1; });
+      gained += group.length * 10 * combo;
+      popSound(group.length);
+      // Anything no longer hanging from the ceiling falls
+      const keep = new Set(), q = [];
+      for (let c = 0; c < (grid[0] ? grid[0].length : 0); c++) if (grid[0][c] >= 0) { keep.add("0," + c); q.push([0, c]); }
+      while (q.length) {
+        const [r, c] = q.pop();
+        for (const [rr, cc] of neighbors(r, c)) { const k = rr + "," + cc; if (!keep.has(k) && get(rr, cc) >= 0) { keep.add(k); q.push([rr, cc]); } }
+      }
+      let dropped = 0;
+      for (let r = 0; r < grid.length; r++) for (let c = 0; c < grid[r].length; c++)
+        if (grid[r][c] >= 0 && !keep.has(r + "," + c)) {
+          falling.push({ x: cellX(r, c), y: cellY(r), vx: (Math.random() - 0.5) * 120, vy: -60 - Math.random() * 80, color: grid[r][c] });
+          grid[r][c] = -1; dropped++;
+        }
+      if (dropped) { gained += dropped * 30 * combo; dropSound(dropped); }
+      floaters.push({ x: cellX(cell.r, cell.c), y: cellY(cell.r), text: "+" + gained, at: t });
+    } else combo = 0;
+    score += gained;
+    trimRows();
+    if (!grid.length) {                                          // cleared the board!
+      score += 1000; floaters.push({ x: W / 2, y: 200, text: "+1000", at: t, big: true }); clearSound();
+      pending = { at: t + 0.9, kind: "refill" };
+    } else if (shots % level().shotsPerRow === 0) pending = { at: t + 0.25, kind: "row" };
+    updateHud();
+    checkOver();
+  }
+  function checkOver() {
+    for (let r = 0; r < grid.length; r++) if (grid[r].some(v => v >= 0) && cellY(r) + R > DEAD) { gameOver(); return true; }
+    return false;
+  }
+
+  function update(dt) {
+    if (state !== "play") return;
+    t += dt;
+    if (pending && t >= pending.at) {
+      const p = pending; pending = null;
+      if (p.kind === "row") { pushRowFromTop(); checkOver(); }
+      else if (p.kind === "refill") { for (let r = 0; r < level().rows; r++) pushRowFromTop(); }
+    }
+    // keyboard aim
+    const turn = (keys.arrowright || keys.d ? 1 : 0) - (keys.arrowleft || keys.a ? 1 : 0);
+    if (turn) angle = Math.max(MIN_A, Math.min(MAX_A, angle + turn * 1.6 * dt));
+    if (flying) {
+      const steps = 4, h = dt / steps;
+      for (let i = 0; i < steps && flying; i++) {
+        flying.x += flying.vx * h; flying.y += flying.vy * h;
+        if (flying.x < R) { flying.x = R; flying.vx = Math.abs(flying.vx); bounceSound(); }
+        if (flying.x > W - R) { flying.x = W - R; flying.vx = -Math.abs(flying.vx); bounceSound(); }
+        if (flying.y <= R || hitsBubble(flying.x, flying.y)) land(flying);
+      }
+    }
+  }
+
+  function gameOver() {
+    if (state !== "play") return;
+    state = "over"; $("hud").classList.add("hidden");
+    const newBest = score > save.best[save.diff];
+    if (newBest) { save.best[save.diff] = score; persist(); }
+    $("overTitle").textContent = newBest && score > 0 ? "NEW BEST!" : "GAME OVER";
+    $("overScore").textContent = score.toLocaleString();
+    $("overNote").textContent = level().name + " best: " + save.best[save.diff].toLocaleString();
+    show("over"); overSound();
+  }
+
+  // =====================================================================
+  // Effects
+  // =====================================================================
+  function popEffect(x, y, color, i) {
+    effects.push({ x, y, color, at: t + i * 0.03 });
+    for (let k = 0; k < 6; k++) {
+      const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160;
+      effects.push({ x, y, color, at: t + i * 0.03, spark: true, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp });
+    }
+  }
+
+  // =====================================================================
+  // Drawing
+  // =====================================================================
+  function bubble(x, y, color, r = R, alpha = 1) {
+    const p = PALETTE[color];
+    ctx.globalAlpha = alpha;
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(0.18, p.fill); g.addColorStop(1, p.dark);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r - 0.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = `900 ${r * 0.75}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(p.mark, x, y + r * 0.06);
+    ctx.globalAlpha = 1;
+  }
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    const sx = shake > 0 ? (Math.random() - 0.5) * 10 * shake : 0;
+    ctx.setTransform(s * dpr, 0, 0, s * dpr, (ox + sx) * dpr, oy * dpr);
+
+    // Playfield
+    ctx.fillStyle = "rgba(10, 6, 30, 0.55)";
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-8, -8, W + 16, H + 16, 22) : ctx.rect(-8, -8, W + 16, H + 16); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 2; ctx.stroke();
+    // Danger line
+    ctx.setLineDash([10, 10]); ctx.strokeStyle = "rgba(255, 95, 168, 0.55)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, DEAD); ctx.lineTo(W, DEAD); ctx.stroke(); ctx.setLineDash([]);
+
+    // Grid
+    for (let r = 0; r < grid.length; r++) for (let c = 0; c < grid[r].length; c++) if (grid[r][c] >= 0) bubble(cellX(r, c), cellY(r), grid[r][c]);
+
+    // Aim guide
+    if (state === "play" && !flying) {
+      const tr = traceAim();
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      for (let i = 0; i < tr.pts.length - 1; i++) {
+        const a = tr.pts[i], b = tr.pts[i + 1], len = Math.hypot(b.x - a.x, b.y - a.y);
+        for (let d = (t * 60) % 22; d < len; d += 22) { ctx.beginPath(); ctx.arc(a.x + (b.x - a.x) * d / len, a.y + (b.y - a.y) * d / len, 3, 0, Math.PI * 2); ctx.fill(); }
+      }
+      if (tr.end) {
+        const cell = snapCell(tr.end.x, tr.end.y);
+        if (cell) { ctx.strokeStyle = PALETTE[current].fill; ctx.lineWidth = 3; ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.arc(cellX(cell.r, cell.c), cellY(cell.r), R - 2, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+        trimRows();
+      }
+    }
+
+    // Shooter
+    ctx.save(); ctx.translate(W / 2, SHOOT_Y); ctx.rotate(angle + Math.PI / 2);
+    ctx.fillStyle = "#2b2050"; ctx.beginPath(); ctx.moveTo(-14, 6); ctx.lineTo(14, 6); ctx.lineTo(8, -46); ctx.lineTo(-8, -46); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffd84a"; ctx.fillRect(-8, -50, 16, 6);
+    ctx.restore();
+    ctx.fillStyle = "#2b2050"; ctx.beginPath(); ctx.arc(W / 2, SHOOT_Y, 30, 0, Math.PI * 2); ctx.fill();
+    if (!flying) bubble(W / 2, SHOOT_Y, current);
+    // Next bubble (tap it to swap)
+    ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.arc(W / 2 + 78, SHOOT_Y + 16, 22, 0, Math.PI * 2); ctx.fill();
+    bubble(W / 2 + 78, SHOOT_Y + 16, next, R * 0.78);
+    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(W / 2 + 78, SHOOT_Y + 16, 28, -2.4, -0.7); ctx.stroke();
+    // Shots until the next row drops: little dots
+    const left = level().shotsPerRow - (shots % level().shotsPerRow);
+    for (let i = 0; i < level().shotsPerRow; i++) {
+      ctx.fillStyle = i < left ? "rgba(255,255,255,0.75)" : "rgba(255, 95, 168, 0.9)";
+      ctx.beginPath(); ctx.arc(W / 2 - 150 + i * 14, SHOOT_Y + 22, 4.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Flying bubble
+    if (flying) bubble(flying.x, flying.y, flying.color);
+
+    // Pops, falling bubbles, score numbers
+    for (const e of effects) {
+      const age = t - e.at; if (age < 0) { if (!e.spark) bubble(e.x, e.y, e.color); continue; }
+      if (e.spark) { ctx.globalAlpha = Math.max(0, 1 - age / 0.45); ctx.fillStyle = PALETTE[e.color].fill; ctx.beginPath(); ctx.arc(e.x + e.vx * age, e.y + e.vy * age, 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+      else bubble(e.x, e.y, e.color, R * (1 + age * 2.2), Math.max(0, 1 - age / 0.2));
+    }
+    for (const f of falling) bubble(f.x, f.y, f.color, R, Math.max(0, 1 - (f.y - DEAD) / 200));
+    for (const f of floaters) {
+      const age = t - f.at, a = Math.max(0, 1 - age / 1.1);
+      ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.font = `900 ${f.big ? 40 : 22}px Avenir Next, system-ui, sans-serif`; ctx.textAlign = "center";
+      ctx.fillText(f.text, f.x, f.y - age * 40); ctx.globalAlpha = 1;
+    }
+  }
+
+  // =====================================================================
+  // Input: drag to aim and let go to shoot; mouse aims and clicks; keys turn and fire
+  // =====================================================================
+  const keys = {};
+  let aiming = null;
+  const nearNext = p => Math.hypot(p.x - (W / 2 + 78), p.y - (SHOOT_Y + 16)) < 36;
+  canvas.addEventListener("pointerdown", e => {
+    focusGame(); initAudio();
+    if (state !== "play") return;
+    const p = toBoard(e.clientX, e.clientY);
+    if (nearNext(p)) { swap(); return; }
+    aiming = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    aimAt(p.x, p.y);
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (state !== "play") return;
+    if (aiming === e.pointerId || e.pointerType === "mouse") { const p = toBoard(e.clientX, e.clientY); if (!nearNext(p)) aimAt(p.x, p.y); }
+  });
+  canvas.addEventListener("pointerup", e => { if (aiming === e.pointerId) { aiming = null; shoot(); } });
+  canvas.addEventListener("pointercancel", e => { if (aiming === e.pointerId) aiming = null; });
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if (k.startsWith("arrow") || k === " ") e.preventDefault();
+    keys[k] = true;
+    if (e.repeat) return;
+    if (k === "escape" || k === "p") { if (state === "play") pauseGame(); else if (state === "pause") resume(); }
+    else if (k === " " || k === "enter" || k === "arrowup" || k === "w") {
+      if (state === "menu" || state === "over") { initAudio(); startGame(); } else if (state === "pause") resume(); else shoot();
+    }
+    else if (k === "shift" || k === "arrowdown" || k === "s") swap();
+    else if (k === "f") toggleFull();
+  });
+  addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+  addEventListener("blur", () => { for (const k in keys) keys[k] = false; if (state === "play") pauseGame(); });
+
+  // =====================================================================
+  // Sound
+  // =====================================================================
+  let actx = null;
+  function initAudio() { if (actx) { if (actx.state === "suspended") actx.resume(); return; } try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const st = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, st); o.frequency.exponentialRampToValueAtTime(f1, st + dur);
+    g.gain.setValueAtTime(vol, st); g.gain.exponentialRampToValueAtTime(0.001, st + dur);
+    o.connect(g); g.connect(actx.destination); o.start(st); o.stop(st + dur + 0.03);
+  }
+  const shootSound = () => tone("triangle", 380, 760, 0.1, 0.12);
+  const stickSound = () => tone("sine", 260, 160, 0.06, 0.12);
+  const bounceSound = () => tone("sine", 520, 440, 0.04, 0.06);
+  const tick = () => tone("square", 880, 880, 0.03, 0.05);
+  const rowSound = () => tone("sawtooth", 140, 70, 0.25, 0.1);
+  function popSound(n) { for (let i = 0; i < Math.min(n, 10); i++) tone("sine", 600 + i * 90, 900 + i * 90, 0.09, 0.1, i * 0.035); }
+  function dropSound(n) { for (let i = 0; i < Math.min(n, 8); i++) tone("triangle", 900 - i * 70, 300, 0.18, 0.07, 0.15 + i * 0.04); }
+  function clearSound() { [523, 659, 784, 1047].forEach((f, i) => tone("triangle", f, f, 0.2, 0.12, i * 0.1)); }
+  function overSound() { [392, 330, 262].forEach((f, i) => tone("triangle", f, f * 0.98, 0.3, 0.12, i * 0.18)); }
+
+  // =====================================================================
+  // Menus
+  // =====================================================================
+  function show(id) { for (const s2 of ["menu", "pause", "over"]) $(s2).classList.toggle("hidden", s2 !== id); }
+  function updateHud() { $("scoreNum").textContent = score.toLocaleString(); $("bestNum").textContent = Math.max(score, save.best[save.diff]).toLocaleString(); }
+  function renderMenu() {
+    for (const b of $("diffSeg").children) b.setAttribute("aria-pressed", Number(b.dataset.diff) === save.diff);
+    const b = save.best[save.diff];
+    $("best").textContent = b ? `Your ${level().name} best: ${b.toLocaleString()}` : `${level().colors} colors · a new row drops every ${level().shotsPerRow} shots`;
+    $("soundBtn").textContent = "Sound: " + (save.sound ? "on" : "off");
+  }
+  for (const b of $("diffSeg").children) b.addEventListener("click", () => { save.diff = Number(b.dataset.diff); persist(); renderMenu(); });
+  $("help").innerHTML = `<p><b>Aim:</b> drag your finger and let go to shoot. With a mouse, point and click. On a keyboard, ← → aim and Space shoots.</p>
+    <p><b>Pop:</b> touch 3 or more bubbles of the same color. Bubbles left hanging with nothing holding them up fall for extra points.</p>
+    <p><b>Swap:</b> tap the small bubble next to the shooter (or press Shift) to swap it in.</p>
+    <p>The dots by the shooter count down to the next new row. Don't let the bubbles cross the pink line! <b>P</b> pause · <b>F</b> full screen</p>`;
+  $("helpBtn").addEventListener("click", () => $("help").classList.toggle("hidden"));
+  $("soundBtn").addEventListener("click", () => { save.sound = !save.sound; persist(); renderMenu(); });
+  $("playBtn").addEventListener("click", () => { initAudio(); startGame(); });
+  $("againBtn").addEventListener("click", () => { initAudio(); startGame(); });
+  $("menuBtn").addEventListener("click", toMenu);
+  $("quitBtn").addEventListener("click", toMenu);
+  $("resumeBtn").addEventListener("click", resume);
+  $("pauseBtn").addEventListener("click", pauseGame);
+  function toMenu() { state = "menu"; $("hud").classList.add("hidden"); renderMenu(); show("menu"); }
+  function pauseGame() { if (state !== "play") return; state = "pause"; aiming = null; show("pause"); }
+  function resume() { if (state !== "pause") return; state = "play"; show(null); focusGame(); }
+  function focusGame() { try { window.focus(); canvas.tabIndex = 0; canvas.focus({ preventScroll: true }); } catch (e) {} }
+
+  const root = document.documentElement;
+  let toastTimer;
+  function toast(msg) { const el = $("toast"); el.textContent = msg; el.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.style.opacity = 0, 4500); }
+  async function toggleFull() {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else if (root.requestFullscreen && document.fullscreenEnabled !== false) await root.requestFullscreen({ navigationUI: "hide" });
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+      else throw 0;
+    } catch (e) { toast("This window didn't allow full screen. Try opening the game in its own browser tab."); }
+  }
+  $("fsBtn").addEventListener("click", toggleFull);
+  $("fsMenuBtn").addEventListener("click", toggleFull);
+  for (const ev of ["fullscreenchange", "webkitfullscreenchange"]) document.addEventListener(ev, layout);
+
+  // =====================================================================
+  // Loop
+  // =====================================================================
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
+    update(dt);
+    if (state !== "play") t += dt;
+    for (let i = falling.length - 1; i >= 0; i--) { const f = falling[i]; f.vy += 1400 * dt; f.x += f.vx * dt; f.y += f.vy * dt; if (f.y > H + 60) falling.splice(i, 1); }
+    for (let i = effects.length - 1; i >= 0; i--) if (t - effects[i].at > 0.5) effects.splice(i, 1);
+    for (let i = floaters.length - 1; i >= 0; i--) if (t - floaters[i].at > 1.1) floaters.splice(i, 1);
+    shake = Math.max(0, shake - dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  // A board shows behind the menu
+  for (let r = 0; r < 6; r++) { ensureRow(r); grid[r] = makeRow(rowLen(r)); }
+  renderMenu();
+  restore();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

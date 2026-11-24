@@ -1,0 +1,28 @@
+{
+  "name": "Arcade Blitz",
+  "short_name": "Arcade Blitz",
+  "description": "Free browser games: Blitz Arena, Cliff Dive, Air Hockey, Tennis, Bubble Shooter and Hippo Baby Squeaky Double Sled.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#12121a",
+  "theme_color": "#12121a",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

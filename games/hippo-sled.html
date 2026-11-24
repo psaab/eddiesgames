@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<script>
+/* Saving: use the host's storage when it has one (Claude preview); otherwise this browser's own storage. */
+(function () {
+  try { if (!window.storage && window.parent !== window && window.parent.storage) window.storage = window.parent.storage; } catch (e) {}
+  if (!window.storage) {
+    window.storage = {
+      get: async function (k) { try { var v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; } catch (e) { return null; } },
+      set: async function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} return { key: k, value: v }; }
+    };
+  }
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Hippo Baby Squeaky Double Sled</title>
+<style>
+  :root {
+    --teal: #5e9a92;
+    --teal-dark: #3f726c;
+    --red: #e4483f;
+    --melon: #ff5d73;
+    --panel: rgba(31, 56, 64, 0.88);
+    --ink: #ffffff;
+    --muted: rgba(255, 255, 255, 0.75);
+    --line: rgba(255, 255, 255, 0.2);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) { :root { --panel: rgba(16, 30, 36, 0.92); color-scheme: dark; } }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3ec; color: var(--ink);
+    font-family: "Avenir Next", "Avenir", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  canvas:focus { outline: none; }
+  .hidden { display: none !important; }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, input:focus-visible { outline: 3px solid #ffd84a; outline-offset: 2px; }
+
+  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 18px;
+    background: linear-gradient(180deg, rgba(31, 56, 64, 0.15), rgba(31, 56, 64, 0.65)); }
+  .box { width: min(430px, 100%); display: flex; flex-direction: column; gap: 13px; text-align: center; max-height: 100%; overflow-y: auto;
+    background: var(--panel); border-radius: 24px; padding: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
+  h1 { margin: 0; font-size: clamp(50px, 13vw, 78px); line-height: 0.88; font-weight: 900; letter-spacing: -1px; }
+  h1 .a { display: block; color: #9fe0d6; text-shadow: 0 4px 0 var(--teal-dark); }
+  h1 .b { display: block; color: #ffffff; text-shadow: 0 4px 0 var(--red); }
+  .sub { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.45; }
+  .name { display: flex; flex-direction: column; gap: 6px; text-align: left; font-weight: 800; font-size: 14px; color: var(--muted); }
+  .name input { border: 2px solid var(--line); background: rgba(255,255,255,0.12); border-radius: 12px; padding: 10px 12px; font-size: 18px; font-weight: 800; color: #fff; }
+  .big { border: 0; border-radius: 14px; padding: 15px; font-size: 22px; font-weight: 900; color: #fff; background: var(--red); box-shadow: 0 5px 0 #8f231d; }
+  .big:active { transform: translateY(4px); box-shadow: 0 1px 0 #8f231d; }
+  .ghost { border: 2px solid var(--line); background: rgba(255,255,255,0.08); border-radius: 12px; padding: 11px; font-weight: 800; font-size: 15px; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  #best { font-size: 15px; color: var(--muted); }
+  #help { border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.5; text-align: left; background: rgba(255,255,255,0.08); }
+  #help p { margin: 0 0 6px; } #help p:last-child { margin: 0; }
+  #help b { color: #ffd84a; }
+  #overTitle { font-size: clamp(30px, 8vw, 44px); font-weight: 900; line-height: 1.05; }
+  #overScore { font-size: 56px; font-weight: 900; color: #ffd84a; line-height: 1; font-variant-numeric: tabular-nums; }
+  #overStats { display: flex; justify-content: center; gap: 18px; font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  #hud { position: fixed; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; display: flex; gap: 8px; align-items: flex-start; pointer-events: none; }
+  .chip { background: var(--panel); border-radius: 12px; padding: 6px 12px; font-weight: 900; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .chip small { display: block; font-size: 11px; letter-spacing: 1px; color: var(--muted); font-weight: 700; }
+  #hud .spacer { flex: 1; }
+  #hud button { pointer-events: auto; width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--panel); font-size: 17px; font-weight: 900; }
+  #toast { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); background: var(--panel); border: 2px solid #ffd84a;
+    border-radius: 12px; padding: 9px 14px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity 0.25s; max-width: 92vw; text-align: center; z-index: 5; }
+  .pickLabel { font-weight: 800; font-size: 14px; color: var(--muted); text-align: left; margin-bottom: -6px; }
+  #charPick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #charPick button { border: 3px solid var(--line); background: rgba(255,255,255,0.08); border-radius: 16px; padding: 6px 6px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 900; font-size: 16px; }
+  #charPick button[aria-pressed="true"] { border-color: #ffd84a; background: rgba(255, 216, 74, 0.14); }
+  #charPick canvas { width: 100%; max-width: 120px; height: auto; aspect-ratio: 120 / 92; border-radius: 12px; display: block; }
+  #bothNote { margin: -4px 0 0; font-size: 14px; color: var(--muted); text-align: left; }
+  h1 .a.long { font-size: 0.66em; line-height: 1.05; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="hidden">
+  <div class="chip"><small>SCORE</small><span id="scoreNum">0</span></div>
+  <div class="chip"><small id="snackIcon">🍉</small><span id="melonNum">0</span></div>
+  <div class="chip"><small>METERS</small><span id="distNum">0</span></div>
+  <div class="spacer"></div>
+  <button id="pauseBtn" aria-label="Pause">II</button><button id="fsBtn" aria-label="Full screen">⛶</button>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="menu" class="screen">
+  <div class="box">
+    <h1><span class="a" id="titleChar">HIPPO BABY</span><span class="b">SLED</span></h1>
+    <p class="sub" id="menuSub">Sled down the snowy mountain! Tap to jump, hold to flip, and grab every watermelon.</p>
+    <div class="pickLabel">Pick your sledder</div>
+    <div id="charPick" role="group" aria-label="Pick your sledder"></div>
+    <label class="name" id="nameWrap"><span id="nameLabel">Your hippo's name</span><input id="nameInput" maxlength="16" placeholder="Hippo" autocomplete="off"></label>
+    <p id="bothNote" class="hidden"></p>
+    <div id="best"></div>
+    <button class="big" id="playBtn">Let's sled!</button>
+    <div class="row"><button class="ghost" id="helpBtn">How to play</button><button class="ghost" id="soundBtn">Sound: on</button></div>
+    <button class="ghost" id="fsMenuBtn">⛶ Full screen</button>
+    <div id="help" class="hidden">
+      <p><b>Tap</b> (or press Space) to jump off the snow.</p>
+      <p><b>Hold</b> while you're in the air to do backflips. Let go so your sled is flat when you land, or you'll wipe out!</p>
+      <p>Jump over <b>rocks and logs</b>. Grab <b id="snackHelp">watermelons 🍉</b> for points. Every flip you land gives big points and a speed boost.</p>
+      <p><b>P</b> pause · <b>F</b> full screen</p>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="box">
+    <h1 style="font-size:52px"><span class="a">PAUSED</span></h1>
+    <button class="big" id="resumeBtn">Keep sledding</button>
+    <button class="ghost" id="quitBtn">Quit to menu</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="box">
+    <div id="overTitle"></div>
+    <div id="overScore">0</div>
+    <div id="overStats"></div>
+    <div id="overNote" class="sub"></div>
+    <button class="big" id="againBtn">Sled again</button>
+    <button class="ghost" id="menuBtn">Menu</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $("c");
+  let ctx = canvas.getContext("2d");
+
+  // =====================================================================
+  // Tuning
+  // =====================================================================
+  const G = 1650, JUMP = 640, FLIP_SPEED = 9.5, MIN_V = 230, MAX_V = 900, START_X = 360;
+  // top speed grows the farther you go, so the start is gentle
+  const topSpeed = () => Math.min(MAX_V, 600 + Math.max(0, hip.x - START_X) / 50 * 0.5);
+  const TEAL = "#5e9a92", TEAL_DARK = "#3f726c", TEAL_LIGHT = "#86bdb4", SNOUT = "#6fa89f";
+
+  const save = { best: 0, sound: true, bestDist: 0, char: "hippo", names: { hippo: "", mouse: "" } };
+  const CHARS = {
+    hippo: { label: "Hippo", defaultName: "Hippo Baby", icon: "🍉", snack: "watermelon", snacks: "watermelons" },
+    mouse: { label: "Mouse", defaultName: "Squeaky", icon: "🧀", snack: "piece of cheese", snacks: "cheese" },
+    both: { label: "Double Sled", title: "DOUBLE", icon: "🍉🧀", snack: "watermelon and piece of cheese", snacks: "watermelons and cheese" },
+  };
+  const ch = () => CHARS[save.char] || CHARS.hippo;
+  let winkUntil = 0;
+  function persist() { try { const p = window.storage.set("hippo-save", JSON.stringify(save), false); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  async function restore() {
+    try {
+      const r = await window.storage.get("hippo-save", false);
+      if (r && r.value) {
+        const d = JSON.parse(r.value);
+        save.best = Math.max(0, d.best | 0); save.bestDist = Math.max(0, d.bestDist | 0);
+        if (d.names && typeof d.names === "object") for (const k in CHARS) save.names[k] = typeof d.names[k] === "string" ? d.names[k].slice(0, 16) : "";
+        else if (typeof d.name === "string") save.names.hippo = d.name.slice(0, 16);      // older saves
+        if (CHARS[d.char]) save.char = d.char;
+        // the hippo is Hippo Baby and the mouse is Squeaky
+        if (!d.hippoBaby) {
+          if (!save.names.hippo || save.names.hippo === "Hippo") save.names.hippo = "Hippo Baby";
+          if (!save.names.mouse || save.names.mouse === "Baby Squeaky") save.names.mouse = "Squeaky";
+        }
+        save.hippoBaby = true;
+        if (typeof d.sound === "boolean") save.sound = d.sound;
+      }
+    } catch (e) {}
+    $("nameInput").value = save.names[save.char] || "";
+    renderMenu();
+  }
+  const nameOf = k => (save.names[k] || "").trim() || CHARS[k].defaultName || CHARS[k].label;
+  const hippoName = () => save.char === "both" ? nameOf("hippo") + " & " + nameOf("mouse") : nameOf(save.char);
+
+  // =====================================================================
+  // Endless snowy hills (smooth curve through random points)
+  // =====================================================================
+  let pts = [], items = [], lastObstacleX = 0;
+  function resetWorld() {
+    pts = [{ x: -800, y: 0 }, { x: -400, y: 0 }, { x: 0, y: 0 }, { x: 420, y: 0 }, { x: 700, y: 40 }, { x: 1000, y: 140 }];
+    items = []; lastObstacleX = 1400;
+    extendWorld(3000);
+  }
+  function extendWorld(toX) {
+    while (pts[pts.length - 1].x < toX) {
+      const p = pts[pts.length - 1], dist = p.x / 60;
+      const dx = 280 + Math.random() * 180;
+      let dy;
+      const r = Math.random();
+      if (r < 0.2 && p.x > 1600) dy = -(50 + Math.random() * 80);           // a bump: launch ramp
+      else if (r < 0.32) dy = 10 + Math.random() * 30;                       // flat stretch
+      else dy = 70 + Math.random() * (110 + Math.min(80, dist * 0.04));      // downhill
+      const np = { x: p.x + dx, y: p.y + dy };
+      pts.push(np);
+      // stuff on this stretch
+      const mid = p.x + dx * (0.35 + Math.random() * 0.3);
+      const level = Math.min(1, p.x / 30000);
+      if (p.x > 1500 && dy > 0 && mid - lastObstacleX > 650 - level * 250 && Math.random() < 0.45 + level * 0.3) {
+        items.push({ kind: Math.random() < 0.65 ? "rock" : "log", x: mid, r: 22 });
+        lastObstacleX = mid;
+      } else if (p.x > 700 && Math.random() < 0.55) {
+        const n = 3 + Math.floor(Math.random() * 3), high = dy < 0 ? 170 : 60;
+        for (let i = 0; i < n; i++) items.push({ kind: "melon", x: p.x + 60 + i * 55, lift: high + Math.sin(i / (n - 1) * Math.PI) * 40, r: 18, gold: Math.random() < 0.04 });
+      }
+    }
+    while (pts.length > 8 && pts[2].x < cam.x - 1400) pts.shift();
+    items = items.filter(it => it.x > cam.x - 900 && !it.gone);
+  }
+  function seg(x) { let i = 1; while (i < pts.length - 2 && pts[i + 1].x <= x) i++; return i; }
+  function groundY(x) {
+    const i = seg(x), p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const u = Math.max(0, Math.min(1, (x - p1.x) / (p2.x - p1.x))), u2 = u * u, u3 = u2 * u;
+    return 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * u + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * u2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * u3);
+  }
+  const slope = x => Math.atan2(groundY(x + 2) - groundY(x - 2), 4);
+
+  // =====================================================================
+  // Hippo
+  // =====================================================================
+  const hip = { x: START_X, y: 0, vx: 0, vy: 0, v: 0, a: 0, w: 0, ground: true, spin: 0, crashed: false, cx: 0, cy: 0, cvx: 0, cvy: 0, ca: 0 };
+  let state = "menu", t = 0, score = 0, melons = 0, flipsTotal = 0, bestJump = 0, holding = false, runT = 0, crashAt = 0;
+  const floaters = [], puffs = [], snow = [];
+  const cam = { x: 0, y: 0 };
+
+  function startGame() {
+    if (save.char !== "both") save.names[save.char] = $("nameInput").value.trim().slice(0, 16);
+    persist();
+    resetWorld();
+    Object.assign(hip, { x: START_X - 260, y: 0, vx: 0, vy: 0, v: 160, a: 0, w: 0, ground: true, spin: 0, crashed: false });
+    score = 0; melons = 0; flipsTotal = 0; bestJump = 0; runT = 0; holding = false;
+    floaters.length = 0; puffs.length = 0;
+    cam.x = hip.x - innerWidth * 0.3; cam.y = -innerHeight * 0.55;
+    state = "play"; show(null); $("hud").classList.remove("hidden"); updateHud(); focusGame();
+  }
+
+  function press() {
+    if (state !== "play") return;
+    holding = true;
+    if (hip.ground && !hip.crashed) {
+      const th = slope(hip.x);
+      hip.vx = Math.cos(th) * hip.v + Math.sin(th) * JUMP;
+      hip.vy = Math.sin(th) * hip.v - Math.cos(th) * JUMP;
+      hip.ground = false; hip.spin = 0;
+      jumpSound(); puff(hip.x, hip.y, 6);
+    }
+  }
+  function release() { holding = false; }
+
+  const wrap = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+
+  function crash() {
+    if (hip.crashed) return;
+    hip.crashed = true; crashAt = t;
+    // hippo tumbles off the sled
+    hip.cx = hip.x; hip.cy = hip.y - 30; hip.cvx = (hip.ground ? Math.cos(hip.a) * hip.v : hip.vx) * 0.6; hip.cvy = -380; hip.ca = hip.a;
+    crashSound(); puff(hip.x, hip.y, 18);
+  }
+
+  function update(dt) {
+    if (state !== "play") return;
+    t += dt; runT += dt;
+    extendWorld(cam.x + innerWidth * 2.5);
+    if (hip.crashed) {
+      hip.cvy += G * dt; hip.cx += hip.cvx * dt; hip.cy += hip.cvy * dt; hip.ca += 9 * dt;
+      const gy = groundY(hip.cx);
+      if (hip.cy > gy - 30) { hip.cy = gy - 30; hip.cvy *= -0.35; hip.cvx *= 0.7; }
+      if (t - crashAt > 1.6) gameOver();
+      return;
+    }
+    const steps = 3, h = dt / steps;
+    for (let i = 0; i < steps; i++) stepHippo(h);
+    // pick things up / bump into things
+    for (const it of items) {
+      if (it.gone) continue;
+      const iy = groundY(it.x) - (it.kind === "melon" ? it.lift : it.r * 0.7);
+      const dx = it.x - hip.x, dy = iy - (hip.y - 26);
+      if (Math.abs(dx) > 80) continue;
+      if (it.kind === "melon" && Math.hypot(dx, dy) < it.r + 30) {
+        it.gone = true; const pts2 = it.gold ? 100 : 10; melons += it.gold ? 5 : 1; score += pts2;
+        floaters.push({ x: it.x, y: iy, text: "+" + pts2, at: t, color: it.gold ? "#ffd84a" : "#ff5d73" }); melonSound(it.gold);
+      } else if (it.kind !== "melon" && Math.hypot(dx, dy) < it.r + 22 && hip.y > groundY(hip.x) - 40) crash();
+    }
+    const dist = Math.max(0, Math.floor((hip.x - START_X) / 50));
+    $("distNum").textContent = dist;
+    // camera
+    const lookAhead = Math.min(220, hip.v * 0.2);
+    const tx = hip.x - innerWidth * 0.3 + lookAhead, ty = hip.y - innerHeight * 0.5;
+    cam.x += (tx - cam.x) * Math.min(1, dt * 6); cam.y += (ty - cam.y) * Math.min(1, dt * 3.5);
+    if (Math.random() < hip.v / 2400 && hip.ground) puff(hip.x - 30, hip.y, 1);
+    if (wind) wind.g.gain.setTargetAtTime(save.sound ? Math.min(0.12, (hip.ground ? hip.v : Math.hypot(hip.vx, hip.vy)) / 7000) : 0, actx.currentTime, 0.1);
+  }
+
+  function stepHippo(dt) {
+    if (hip.ground) {
+      const th = slope(hip.x);
+      hip.v += (G * Math.sin(th) * 0.55 - hip.v * 0.1) * dt;
+      if (runT < 1.4) hip.v = Math.max(hip.v, 160 + runT * 120);
+      hip.v = Math.max(MIN_V * (runT < 1.4 ? 0.5 : 1), Math.min(topSpeed(), hip.v));
+      const vx = Math.cos(th) * hip.v, vy = Math.sin(th) * hip.v;
+      // Does the snow drop away faster than we can fall? Then we fly off the crest.
+      const nx = hip.x + vx * dt, ny = hip.y + vy * dt + 0.5 * G * dt * dt;
+      if (ny < groundY(nx) - 0.25 && runT > 0.5) { hip.ground = false; hip.vx = vx; hip.vy = vy; hip.spin = 0; }
+      else { hip.x = nx; hip.y = groundY(nx); hip.a += (wrap(slope(hip.x) - hip.a)) * Math.min(1, dt * 20); }
+    } else {
+      hip.vy += G * dt; hip.vx *= 1 - 0.02 * dt;
+      hip.x += hip.vx * dt; hip.y += hip.vy * dt;
+      hip.w = holding ? -FLIP_SPEED : 0;                                   // let go = stop spinning
+      hip.a += hip.w * dt; hip.spin += hip.w * dt;
+      // not flipping? the hippo leans to match the slope below, so plain jumps land safely
+      if (!holding && Math.abs(hip.w) < 1) hip.a += wrap(slope(hip.x) - hip.a) * Math.min(1, dt * 3);
+      const gy = groundY(hip.x);
+      if (hip.y >= gy) {
+        hip.y = gy;
+        const th = slope(hip.x), diff = wrap(hip.a - th);
+        if (Math.abs(diff) > 1.1) { crash(); return; }
+        const flips = Math.floor(Math.abs(hip.spin) / (2 * Math.PI) + 0.12);
+        hip.ground = true; hip.a = th; hip.w = 0;
+        hip.v = Math.min(topSpeed(), Math.max(MIN_V, hip.vx * Math.cos(th) + hip.vy * Math.sin(th)));
+        landSound(); puff(hip.x, hip.y, 8);
+        if (flips > 0) {
+          const pts2 = 100 * flips * flips;
+          score += pts2; flipsTotal += flips; bestJump = Math.max(bestJump, flips);
+          hip.v = Math.min(topSpeed() + 80, hip.v + 110 * flips);
+          floaters.push({ x: hip.x, y: hip.y - 90, text: "+" + pts2, at: t, color: "#ffffff", big: flips > 1 });
+          flipSound(flips); winkUntil = t + 0.8;
+        }
+        // a clean, flat landing is worth a little extra
+        else if (Math.abs(diff) < 0.15 && Math.abs(hip.spin) > 0.1) { score += 5; }
+        updateHud();
+      }
+    }
+  }
+
+  function gameOver() {
+    if (state !== "play") return;
+    state = "over"; $("hud").classList.add("hidden"); holding = false;
+    const dist = Math.max(0, Math.floor((hip.x - START_X) / 50));
+    const total = score + dist;
+    const newBest = total > save.best;
+    if (newBest) save.best = total;
+    save.bestDist = Math.max(save.bestDist, dist); persist();
+    $("overTitle").textContent = newBest && total > 0 ? "New best, " + hippoName() + "!" : hippoName() + " wiped out!";
+    $("overScore").textContent = total.toLocaleString();
+    $("overStats").innerHTML = `<span>${dist} m</span><span>${ch().icon} ${melons}</span><span>${flipsTotal} flip${flipsTotal === 1 ? "" : "s"}</span>`;
+    $("overNote").textContent = "Best: " + save.best.toLocaleString() + " · farthest " + save.bestDist + " m";
+    show("over");
+    if (wind) wind.g.gain.setTargetAtTime(0, actx.currentTime, 0.1);
+  }
+
+  // =====================================================================
+  // Drawing
+  // =====================================================================
+  function puff(x, y, n) { for (let i = 0; i < n; i++) puffs.push({ x, y, vx: (Math.random() - 0.7) * 160, vy: -Math.random() * 140, r: 4 + Math.random() * 6, at: t }); }
+  function tree(x, y, h, color) {
+    ctx.fillStyle = color;
+    for (let i = 0; i < 4; i++) {
+      const w = h * (0.42 - i * 0.07), ty = y - h * (0.2 + i * 0.22);
+      ctx.beginPath(); ctx.moveTo(x, ty - h * 0.3); ctx.lineTo(x + w, ty + h * 0.08); ctx.lineTo(x - w, ty + h * 0.08); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillRect(x - h * 0.03, y - h * 0.2, h * 0.06, h * 0.2);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.moveTo(x, y - h * 0.96); ctx.lineTo(x + h * 0.08, y - h * 0.82); ctx.lineTo(x - h * 0.08, y - h * 0.82); ctx.closePath(); ctx.fill();
+  }
+  function hash(n) { const s2 = Math.sin(n * 127.1) * 43758.5453; return s2 - Math.floor(s2); }
+  function drawBackground() {
+    const W = innerWidth, H = innerHeight;
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, "#9cc3dc"); sky.addColorStop(0.55, "#dfeef4"); sky.addColorStop(1, "#f4f8fa");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // far mountains
+    const mx = cam.x * 0.08, my = cam.y * 0.04;
+    ctx.fillStyle = "#b9d0dd";
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (let i = -1; i < W / 140 + 3; i++) { const bx = i * 140 - (mx % 140), k = Math.floor((mx + bx) / 140); ctx.lineTo(bx + 70, H * 0.42 - hash(k) * 110 - my); ctx.lineTo(bx + 140, H * 0.56 - my); }
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    // forest layers (parallax)
+    for (const [par, gap, hgt, col, yOff] of [[0.25, 70, 90, "#7fa3a8", 0.66], [0.5, 90, 150, "#4d7a73", 0.8]]) {
+      const ox2 = cam.x * par;
+      for (let i = -2; i < W / gap + 3; i++) {
+        const k = Math.floor(ox2 / gap) + i, x = k * gap - ox2 + hash(k) * gap * 0.6;
+        tree(x, H * yOff - cam.y * par * 0.15 + hash(k + 9) * 30, hgt * (0.7 + hash(k + 3) * 0.6), col);
+      }
+    }
+  }
+  function drawCabin() {
+    // the cabin at the top, with big black-framed windows
+    const x = -520, y = 0;
+    ctx.fillStyle = "#f3efe8"; ctx.fillRect(x, y - 260, 420, 260);
+    ctx.fillStyle = "#2b2b30";
+    for (let i = 0; i < 3; i++) { ctx.fillRect(x + 30 + i * 125, y - 230, 110, 200); }
+    ctx.fillStyle = "#cfe3ec";
+    for (let i = 0; i < 3; i++) { ctx.fillRect(x + 36 + i * 125, y - 224, 98, 188); }
+    ctx.fillStyle = "#4d7a73"; for (let i = 0; i < 3; i++) tree(x + 85 + i * 125, y - 40, 150, "rgba(77,122,115,0.55)");
+    ctx.fillStyle = "#3a3a40"; ctx.beginPath(); ctx.moveTo(x - 30, y - 255); ctx.lineTo(x + 210, y - 360); ctx.lineTo(x + 450, y - 255); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.moveTo(x - 40, y - 250); ctx.lineTo(x + 210, y - 368); ctx.lineTo(x + 460, y - 250); ctx.lineTo(x + 440, y - 262); ctx.lineTo(x + 210, y - 350); ctx.lineTo(x - 20, y - 262); ctx.closePath(); ctx.fill();
+    // deck rail like in the photo
+    ctx.strokeStyle = "#3a3a40"; ctx.lineWidth = 3;
+    for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(x + 410, y - 70 + i * 13); ctx.lineTo(x + 560, y - 70 + i * 13); ctx.stroke(); }
+    ctx.fillStyle = "#3a3a40"; ctx.fillRect(x + 410, y - 80, 8, 80); ctx.fillRect(x + 556, y - 80, 8, 80);
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(x + 405, y - 92, 165, 14);
+  }
+  function drawGround() {
+    const W = innerWidth, H = innerHeight;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.moveTo(cam.x - 40, cam.y + H + 400);
+    for (let x = cam.x - 40; x <= cam.x + W + 40; x += 10) ctx.lineTo(x, groundY(x));
+    ctx.lineTo(cam.x + W + 40, cam.y + H + 400); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#d8e6ee"; ctx.lineWidth = 6;
+    ctx.beginPath();
+    for (let x = cam.x - 40; x <= cam.x + W + 40; x += 10) { const y = groundY(x) + 10; x === cam.x - 40 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+    ctx.stroke();
+    // trees growing out of the slope here and there
+    for (let k = Math.floor(cam.x / 230) - 1; k < (cam.x + W) / 230 + 1; k++) {
+      if (hash(k * 3.1) < 0.45) continue;
+      const x = k * 230 + hash(k) * 120;
+      if (x < 300) continue;
+      tree(x, groundY(x) + 70 + hash(k + 1) * 30, 120 + hash(k + 2) * 60, "#2f5d55");
+    }
+  }
+  function drawItem(it) {
+    const gy = groundY(it.x);
+    const cheese = save.char === "mouse" || (save.char === "both" && Math.floor(it.x / 55) % 2 === 0);
+    if (it.kind === "melon" && cheese) {
+      // a wedge of cheese (gold ones sparkle)
+      const y = gy - it.lift + Math.sin(t * 3 + it.x) * 4;
+      ctx.save(); ctx.translate(it.x, y); ctx.rotate(Math.sin(t * 2 + it.x) * 0.2);
+      ctx.fillStyle = it.gold ? "#ffe066" : "#ffcc3a"; ctx.beginPath(); ctx.moveTo(-18, 10); ctx.lineTo(18, 10); ctx.lineTo(18, -10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = it.gold ? "#e0b000" : "#e7a51c"; ctx.fillRect(15, -9, 3, 19);
+      ctx.fillStyle = "#f2953a"; for (const [hx, hy, hr] of [[6, 4, 3], [12, -2, 2.2], [0, 7, 1.8]]) { ctx.beginPath(); ctx.ellipse(hx, hy, hr, hr * 0.8, 0, 0, 7); ctx.fill(); }
+      if (it.gold) star(-6 + Math.sin(t * 5) * 2, -10, 5, "#ffffff");
+      ctx.restore();
+    } else if (it.kind === "melon") {
+      const y = gy - it.lift + Math.sin(t * 3 + it.x) * 4;
+      ctx.save(); ctx.translate(it.x, y); ctx.rotate(Math.sin(t * 2 + it.x) * 0.2);
+      ctx.fillStyle = it.gold ? "#c99a00" : "#2f8a3e"; ctx.beginPath(); ctx.arc(0, 0, it.r, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = it.gold ? "#ffd84a" : "#ff5d73"; ctx.beginPath(); ctx.arc(0, 0, it.r - 4, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = "#2a1a1a"; for (const sx of [-7, 0, 7]) { ctx.beginPath(); ctx.ellipse(sx, 6, 1.6, 2.6, 0, 0, 7); ctx.fill(); }
+      ctx.restore();
+    } else if (it.kind === "rock") {
+      ctx.fillStyle = "#7d8790"; ctx.beginPath(); ctx.ellipse(it.x, gy - 10, 28, 22, 0, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(it.x - 4, gy - 28, 16, 6, 0, 0, 7); ctx.fill();
+    } else {
+      ctx.save(); ctx.translate(it.x, gy - 12); ctx.rotate(slope(it.x));
+      ctx.fillStyle = "#7a5232"; ctx.fillRect(-40, -12, 80, 24);
+      ctx.fillStyle = "#c9a072"; ctx.beginPath(); ctx.ellipse(40, 0, 6, 12, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(-34, -16, 50, 6);
+      ctx.restore();
+    }
+  }
+  const drawRider = (...args) => (save.char === "both" ? drawBoth : save.char === "mouse" ? drawMouse : drawHippo)(...args);
+  // Hippo and mouse riding together: a longer sled, mouse up front, hippo behind
+  function drawBoth(x, y, a, onSled = true, sp = 1) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    if (onSled) { ctx.save(); ctx.translate(6, 0); ctx.scale(1.42, 1); drawSled(); ctx.restore(); }
+    ctx.translate(0, onSled ? -20 : 0);
+    drawHippo(-30, 0, 0, false, sp);
+    ctx.save(); ctx.translate(42, 0); ctx.scale(0.76, 0.76); drawMouse(0, 0, 0, false, sp); ctx.restore();
+    ctx.restore();
+  }
+  function drawSled() {
+    ctx.fillStyle = "#c8362e"; ctx.beginPath();
+    ctx.moveTo(-44, -6); ctx.lineTo(36, -6); ctx.quadraticCurveTo(58, -8, 54, -24); ctx.lineTo(48, -22); ctx.quadraticCurveTo(48, -12, 34, -12); ctx.lineTo(-44, -12); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e4483f"; ctx.fillRect(-46, -20, 84, 9);
+    ctx.strokeStyle = "#5a2a26"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-40, -1); ctx.lineTo(44, -1); ctx.stroke();
+  }
+  function star(cx, cy, r, col) {
+    ctx.fillStyle = col; ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const q = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(cx + Math.cos(q) * rr, cy + Math.sin(q) * rr); }
+    ctx.closePath(); ctx.fill();
+  }
+  function heart(cx, cy, k, col) {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(cx, cy + k * 0.9);
+    ctx.bezierCurveTo(cx - k * 1.6, cy - k * 0.2, cx - k * 0.6, cy - k * 1.3, cx, cy - k * 0.4);
+    ctx.bezierCurveTo(cx + k * 0.6, cy - k * 1.3, cx + k * 1.6, cy - k * 0.2, cx, cy + k * 0.9); ctx.fill();
+  }
+  // The second sledder: a gray mouse in a cozy cheese costume, with big pink-lined ears and a sparkly eye
+  function drawMouse(x, y, a, onSled = true, sp = 1) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    if (onSled) drawSled();
+    ctx.translate(0, onSled ? -20 : 0);
+    const GRAY = "#8d9096", GRAY_D = "#686b71", PINK = "#f6a5b8", CH = "#ffcc3a", CH_D = "#e7a51c", HOLE = "#f2953a";
+    const oval = (cx, cy, rx, ry, col, rot = 0) => { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2); ctx.fill(); };
+    const wave = Math.sin(t * 14) * 3 * sp;
+    // tail swishing in the wind
+    ctx.strokeStyle = GRAY_D; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-30, -12); ctx.bezierCurveTo(-50, -10 + wave, -62, -30 + wave, -50 - 6 * sp, -42 + wave * 1.4); ctx.stroke();
+    oval(-16, -5, 12, 7, GRAY_D);                                         // back foot
+    // body in the cheese suit
+    oval(-4, -26, 32, 25, CH); oval(-2, -20, 26, 15, "#ffd95e");
+    for (const [hx, hy, hr] of [[-22, -32, 5], [-10, -12, 4], [8, -36, 4.5], [-28, -18, 3]]) oval(hx, hy, hr, hr * 0.8, HOLE);
+    // cheese hood
+    oval(20, -56, 26, 24, CH_D); oval(20, -56, 23.5, 21.5, CH);
+    for (const [hx, hy, hr] of [[6, -72, 3.5], [2, -50, 3], [14, -76, 2.5]]) oval(hx, hy, hr, hr * 0.8, HOLE);
+    // big ears poking out of the hood
+    oval(4, -80, 10, 14, GRAY, -0.5); oval(4, -79, 5.5, 9, PINK, -0.5);
+    oval(26, -84, 11, 15, GRAY, 0.25); oval(26, -83, 6, 10, PINK, 0.25);
+    // face peeking out
+    oval(30, -53, 16, 15, GRAY);
+    if (t < winkUntil) { ctx.strokeStyle = "#1c1c22"; ctx.lineWidth = 2.6; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(33, -55, 4.5, Math.PI + 0.35, -0.35); ctx.stroke(); }
+    else { oval(33, -57, 5.5, 6.5, "#111118"); star(34.2, -58.6, 2.4, "#ffffff"); }
+    heart(45, -50, 4.2, "#f58aa6");
+    ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.3;
+    for (const [dy, len] of [[-3, 14], [1, 15], [5, 12]]) { ctx.beginPath(); ctx.moveTo(41, -46 + dy * 0.4); ctx.lineTo(41 + len, -46 + dy); ctx.stroke(); }
+    ctx.strokeStyle = "#2a2a30"; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(40, -45, 4, 0.2, Math.PI - 0.4); ctx.stroke();
+    oval(22, -14, 8, 11, GRAY_D);                                         // front paw
+    ctx.restore();
+  }
+
+  // The star: a fuzzy teal hippo with little round ears, a big snout and a red scarf
+  function drawHippo(x, y, a, onSled = true, scarf = 1) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    if (onSled) {
+      ctx.fillStyle = "#c8362e"; ctx.beginPath();
+      ctx.moveTo(-44, -6); ctx.lineTo(36, -6); ctx.quadraticCurveTo(58, -8, 54, -24); ctx.lineTo(48, -22); ctx.quadraticCurveTo(48, -12, 34, -12); ctx.lineTo(-44, -12); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e4483f"; ctx.fillRect(-46, -20, 84, 9);
+      ctx.strokeStyle = "#5a2a26"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-40, -1); ctx.lineTo(44, -1); ctx.stroke();
+    }
+    ctx.translate(0, onSled ? -20 : 0);
+    const fur = (cx, cy, rx, ry, col) => {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 2;
+      for (let i = 0; i < 14; i++) { const q = i / 14 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(cx + Math.cos(q) * rx * 0.92, cy + Math.sin(q) * ry * 0.92); ctx.lineTo(cx + Math.cos(q) * (rx + 2.5), cy + Math.sin(q) * (ry + 2.5)); ctx.stroke(); }
+    };
+    // back leg + body
+    fur(-14, -4, 14, 9, TEAL_DARK);
+    fur(-4, -26, 34, 26, TEAL);
+    ctx.fillStyle = TEAL_LIGHT; ctx.beginPath(); ctx.ellipse(6, -18, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
+    // scarf trailing in the wind
+    const flap = Math.sin(t * 18) * 4 * scarf;
+    ctx.fillStyle = "#e4483f";
+    ctx.beginPath(); ctx.moveTo(4, -44); ctx.quadraticCurveTo(-26, -46 + flap, -46 - 10 * scarf, -40 + flap * 1.5); ctx.lineTo(-44 - 10 * scarf, -32 + flap); ctx.quadraticCurveTo(-24, -38, 2, -36); ctx.closePath(); ctx.fill();
+    ctx.fillRect(-2, -48, 20, 10);
+    // head with big snout
+    fur(20, -56, 22, 20, TEAL);
+    fur(38, -48, 18, 14, SNOUT);
+    // ears (little rounded ones, like the plush)
+    fur(10, -76, 6, 9, TEAL_DARK); fur(24, -78, 6, 9, TEAL);
+    ctx.fillStyle = TEAL_DARK; ctx.beginPath(); ctx.ellipse(24, -78, 2.5, 4.5, 0, 0, 7); ctx.fill();
+    // sleepy eye + nostrils + smile
+    ctx.strokeStyle = "#1f2b2a"; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(26, -62, 4, 0.2, Math.PI - 0.2); ctx.stroke();
+    ctx.fillStyle = "#1f2b2a";
+    ctx.beginPath(); ctx.ellipse(46, -54, 2, 3.2, 0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(52, -50, 2, 3.2, 0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(40, -42, 7, 0.3, Math.PI - 0.6); ctx.stroke();
+    ctx.fillStyle = "rgba(255,120,120,0.35)"; ctx.beginPath(); ctx.ellipse(16, -50, 5, 3.5, 0, 0, 7); ctx.fill();
+    // front leg/arm hugging the sled
+    fur(22, -14, 9, 13, TEAL_DARK);
+    ctx.restore();
+  }
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawBackground();
+    ctx.setTransform(dpr, 0, 0, dpr, -cam.x * dpr, -cam.y * dpr);
+    if (cam.x < 200) drawCabin();
+    drawGround();
+    for (const it of items) if (!it.gone && it.x > cam.x - 60 && it.x < cam.x + innerWidth + 60) drawItem(it);
+    for (const p of puffs) { const age = t - p.at; ctx.globalAlpha = Math.max(0, 1 - age / 0.6); ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(p.x + p.vx * age, p.y + p.vy * age + 120 * age * age, p.r * (1 + age), 0, 7); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    if (hip.crashed) {
+      // sled slides on by itself, hippo tumbles
+      const sx = hip.x + Math.min(160, (t - crashAt) * 240);
+      ctx.save(); ctx.translate(sx, groundY(sx)); ctx.rotate(slope(sx));
+      ctx.fillStyle = "#c8362e"; ctx.fillRect(-44, -12, 84, 8); ctx.fillStyle = "#e4483f"; ctx.fillRect(-46, -20, 84, 9);
+      ctx.restore();
+      drawRider(hip.cx, hip.cy + 30, hip.ca, false, 0.3);
+      // dizzy stars
+      for (let i = 0; i < 3; i++) { const q = t * 5 + i * 2.1; ctx.fillStyle = "#ffd84a"; ctx.font = "22px system-ui"; ctx.fillText("★", hip.cx + Math.cos(q) * 30 - 8, hip.cy - 50 + Math.sin(q) * 10); }
+    } else drawRider(hip.x, hip.y, hip.a, true, Math.min(1.4, (hip.ground ? hip.v : Math.hypot(hip.vx, hip.vy)) / 500));
+    for (const f of floaters) {
+      const age = t - f.at; ctx.globalAlpha = Math.max(0, 1 - age / 1.1);
+      ctx.fillStyle = f.color; ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 4;
+      ctx.font = `900 ${f.big ? 38 : 24}px Avenir Next, system-ui, sans-serif`; ctx.textAlign = "center";
+      ctx.strokeText(f.text, f.x, f.y - age * 50); ctx.fillText(f.text, f.x, f.y - age * 50);
+      ctx.globalAlpha = 1;
+    }
+    // falling snow
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    for (const sn of snow) { ctx.beginPath(); ctx.arc(sn.x, sn.y, sn.r, 0, 7); ctx.fill(); }
+  }
+
+  // =====================================================================
+  // Input: tap/click/Space to jump, hold to flip
+  // =====================================================================
+  let held = 0;
+  canvas.addEventListener("pointerdown", e => { focusGame(); initAudio(); held++; press(); });
+  const up = () => { held = Math.max(0, held - 1); if (!held && !keyHeld) release(); };
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  let keyHeld = 0;
+  const JUMP_KEYS = [" ", "arrowup", "w", "shift", "enter"];
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if (k === " " || k.startsWith("arrow")) e.preventDefault();
+    if (e.repeat) return;
+    if (JUMP_KEYS.includes(k)) {
+      if (state === "menu" || state === "over") { if (document.activeElement === $("nameInput") && k !== "enter") return; initAudio(); startGame(); return; }
+      if (state === "pause") { resume(); return; }
+      keyHeld++; press();
+    }
+    else if (k === "escape" || k === "p") { if (state === "play") pauseGame(); else if (state === "pause") resume(); }
+    else if (k === "f" && document.activeElement !== $("nameInput")) toggleFull();
+  });
+  addEventListener("keyup", e => { if (JUMP_KEYS.includes(e.key.toLowerCase())) { keyHeld = Math.max(0, keyHeld - 1); if (!keyHeld && !held) release(); } });
+  addEventListener("blur", () => { held = 0; keyHeld = 0; release(); if (state === "play") pauseGame(); });
+
+  // =====================================================================
+  // Sound
+  // =====================================================================
+  let actx = null, wind = null;
+  function initAudio() {
+    if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = actx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 700; f.Q.value = 0.5;
+      const g = actx.createGain(); g.gain.value = 0;
+      src.connect(f); f.connect(g); g.connect(actx.destination); src.start(); wind = { g };
+    } catch (e) { actx = null; }
+  }
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const st = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, st); o.frequency.exponentialRampToValueAtTime(f1, st + dur);
+    g.gain.setValueAtTime(vol, st); g.gain.exponentialRampToValueAtTime(0.001, st + dur);
+    o.connect(g); g.connect(actx.destination); o.start(st); o.stop(st + dur + 0.03);
+  }
+  const jumpSound = () => tone("sine", 300, 620, 0.15, 0.14);
+  const landSound = () => tone("sine", 180, 90, 0.1, 0.12);
+  function melonSound(gold) { tone("triangle", gold ? 880 : 660, gold ? 1760 : 990, 0.12, 0.12); }
+  function flipSound(n) { for (let i = 0; i <= Math.min(n, 4); i++) tone("triangle", 523 * Math.pow(1.26, i), 523 * Math.pow(1.26, i), 0.14, 0.12, i * 0.08); }
+  function crashSound() { tone("sawtooth", 220, 60, 0.4, 0.12); tone("square", 140, 50, 0.3, 0.06, 0.05); }
+
+  // =====================================================================
+  // Menus
+  // =====================================================================
+  function show(id) { for (const s2 of ["menu", "pause", "over"]) $(s2).classList.toggle("hidden", s2 !== id); }
+  function updateHud() { $("scoreNum").textContent = score.toLocaleString(); $("melonNum").textContent = melons; }
+  function drawPreview(cv, key) {
+    const d = Math.min(window.devicePixelRatio || 1, 2), w = 120, h = 92;
+    cv.width = w * d; cv.height = h * d;
+    const c2 = cv.getContext("2d"); if (!c2) return;
+    const keep = ctx, keepChar = save.char; ctx = c2; save.char = key;
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    ctx.fillStyle = "#dfeef4"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.moveTo(0, 72); ctx.quadraticCurveTo(60, 64, 120, 84); ctx.lineTo(120, 92); ctx.lineTo(0, 92); ctx.closePath(); ctx.fill();
+    if (key === "both") ctx.setTransform(d * 0.62, 0, 0, d * 0.62, 58 * d, 76 * d);
+    else ctx.setTransform(d * 0.82, 0, 0, d * 0.82, 50 * d, 76 * d);
+    drawRider(0, 0, 0.08, true, 1);
+    ctx = keep; save.char = keepChar;
+  }
+  function renderPicker() {
+    const box = $("charPick"); box.innerHTML = "";
+    for (const key of Object.keys(CHARS)) {
+      const b = document.createElement("button");
+      b.setAttribute("aria-pressed", save.char === key);
+      const cv = document.createElement("canvas"); b.append(cv);
+      const label = document.createElement("span"); label.textContent = key === "both" ? CHARS.both.label : nameOf(key); b.append(label);
+      b.addEventListener("click", () => { save.char = key; $("nameInput").value = key === "both" ? "" : save.names[key] || ""; persist(); renderMenu(); });
+      box.append(b); drawPreview(cv, key);
+    }
+  }
+  function renderMenu() {
+    const c = ch();
+    const both = save.char === "both";
+    $("nameWrap").classList.toggle("hidden", both);
+    $("bothNote").classList.toggle("hidden", !both);
+    $("bothNote").textContent = `${nameOf("hippo")} and ${nameOf("mouse")} ride together! To change their names, pick Hippo or Mouse first.`;
+    $("nameLabel").textContent = `Your ${c.label.toLowerCase()}'s name`;
+    $("nameInput").placeholder = c.defaultName || c.label;
+    const single = save.char !== "both" && nameOf(save.char).length <= 12 ? nameOf(save.char) : null;
+    const title = (single || c.title || c.label).toUpperCase();
+    $("titleChar").textContent = title;
+    $("titleChar").classList.toggle("long", title.length > 7);
+    $("snackIcon").textContent = c.icon;
+    $("snackHelp").textContent = `${c.snacks} ${c.icon}`;
+    renderPicker();
+    $("menuSub").textContent = `Help ${hippoName()} sled down the snowy mountain! Tap to jump, hold to flip, and grab every ${c.snack}.`;
+    $("best").textContent = save.best ? `Best: ${save.best.toLocaleString()} · farthest ${save.bestDist} m` : "";
+    $("soundBtn").textContent = "Sound: " + (save.sound ? "on" : "off");
+  }
+  $("nameInput").addEventListener("input", () => { if (save.char === "both") return; save.names[save.char] = $("nameInput").value.slice(0, 16); persist(); renderMenu(); $("nameInput").focus(); });
+  $("helpBtn").addEventListener("click", () => $("help").classList.toggle("hidden"));
+  $("soundBtn").addEventListener("click", () => { save.sound = !save.sound; persist(); renderMenu(); });
+  $("playBtn").addEventListener("click", () => { initAudio(); startGame(); });
+  $("againBtn").addEventListener("click", () => { initAudio(); startGame(); });
+  $("menuBtn").addEventListener("click", toMenu);
+  $("quitBtn").addEventListener("click", toMenu);
+  $("resumeBtn").addEventListener("click", resume);
+  $("pauseBtn").addEventListener("click", pauseGame);
+  function toMenu() { state = "menu"; $("hud").classList.add("hidden"); renderMenu(); show("menu"); demoReset(); }
+  function pauseGame() { if (state !== "play") return; state = "pause"; held = 0; keyHeld = 0; release(); show("pause"); if (wind) wind.g.gain.setTargetAtTime(0, actx.currentTime, 0.05); }
+  function resume() { if (state !== "pause") return; state = "play"; show(null); focusGame(); }
+  function focusGame() { try { window.focus(); canvas.tabIndex = 0; canvas.focus({ preventScroll: true }); } catch (e) {} }
+
+  const root = document.documentElement;
+  let toastTimer;
+  function toast(msg) { const el = $("toast"); el.textContent = msg; el.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.style.opacity = 0, 4500); }
+  async function toggleFull() {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else if (root.requestFullscreen && document.fullscreenEnabled !== false) await root.requestFullscreen({ navigationUI: "hide" });
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+      else throw 0;
+    } catch (e) { toast("This window didn't allow full screen. Try opening the game in its own browser tab."); }
+  }
+  $("fsBtn").addEventListener("click", toggleFull);
+  $("fsMenuBtn").addEventListener("click", toggleFull);
+
+  // =====================================================================
+  // Loop
+  // =====================================================================
+  let dpr = 1;
+  function layout() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    snow.length = 0;
+    for (let i = 0; i < Math.round(innerWidth * innerHeight / 9000); i++) snow.push({ x: Math.random() * innerWidth, y: Math.random() * innerHeight, r: 1 + Math.random() * 2.5, v: 20 + Math.random() * 50, d: Math.random() * 6 });
+  }
+  addEventListener("resize", layout);
+  for (const ev of ["fullscreenchange", "webkitfullscreenchange"]) document.addEventListener(ev, layout);
+  layout();
+
+  // On the menu, the hippo sits on the deck in front of the cabin
+  function demoReset() {
+    resetWorld();
+    Object.assign(hip, { x: START_X - 280, y: 0, a: 0, ground: true, crashed: false, v: 0 });
+    cam.x = hip.x - innerWidth * 0.55; cam.y = -innerHeight * 0.62;
+  }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
+    update(dt);
+    if (state !== "play") t += dt;
+    for (const sn of snow) { sn.y += sn.v * dt; sn.x += Math.sin(t + sn.d) * 12 * dt - (state === "play" ? hip.v * 0.05 * dt : 0); if (sn.y > innerHeight) { sn.y = -4; sn.x = Math.random() * innerWidth; } if (sn.x < -4) sn.x = innerWidth + 4; }
+    for (let i = puffs.length - 1; i >= 0; i--) if (t - puffs[i].at > 0.6) puffs.splice(i, 1);
+    for (let i = floaters.length - 1; i >= 0; i--) if (t - floaters[i].at > 1.1) floaters.splice(i, 1);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  demoReset();
+  renderMenu();
+  restore();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

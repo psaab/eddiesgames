@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<script>
+/* Saving: use the host's storage when it has one (Claude preview); otherwise this browser's own storage. */
+(function () {
+  try { if (!window.storage && window.parent !== window && window.parent.storage) window.storage = window.parent.storage; } catch (e) {}
+  if (!window.storage) {
+    window.storage = {
+      get: async function (k) { try { var v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; } catch (e) { return null; } },
+      set: async function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} return { key: k, value: v }; }
+    };
+  }
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Air Hockey</title>
+<style>
+  :root {
+    --bg: #07070d;
+    --panel: rgba(16, 18, 32, 0.9);
+    --ink: #ffffff;
+    --muted: rgba(255, 255, 255, 0.66);
+    --p1: #2de2ff;
+    --p2: #ff3d8b;
+    --puck: #ffd23f;
+    --line: rgba(255, 255, 255, 0.14);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --panel: rgba(16, 18, 32, 0.92); }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+    font-family: "Avenir Next", "Avenir", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  canvas:focus { outline: none; }
+  .hidden { display: none !important; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--puck); outline-offset: 2px; }
+
+  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 18px;
+    background: radial-gradient(ellipse at center, rgba(7, 7, 13, 0.55), rgba(7, 7, 13, 0.92)); }
+  .box { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; text-align: center; max-height: 100%; overflow-y: auto; }
+  h1 { margin: 0; font-size: clamp(50px, 13vw, 84px); line-height: 0.88; font-weight: 900; font-style: italic; letter-spacing: -1px; }
+  h1 .a { color: var(--p1); text-shadow: 0 0 18px rgba(45, 226, 255, 0.6); display: block; }
+  h1 .b { color: var(--p2); text-shadow: 0 0 18px rgba(255, 61, 139, 0.6); display: block; }
+  .sub { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.45; }
+  .seg { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px; gap: 4px; }
+  .seg button { flex: 1; border: 0; background: transparent; border-radius: 10px; padding: 11px 6px; font-weight: 800; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #0b0b14; }
+  .label { margin: 2px 0 -6px; font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  .big { border: 0; border-radius: 14px; padding: 15px; font-size: 22px; font-weight: 900; font-style: italic; color: #07070d;
+    background: var(--puck); box-shadow: 0 5px 0 #a07c00; }
+  .big:active { transform: translateY(4px); box-shadow: 0 1px 0 #a07c00; }
+  .ghost { border: 2px solid var(--line); background: var(--panel); border-radius: 12px; padding: 11px; font-weight: 800; font-size: 15px; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  #record { font-size: 15px; color: var(--muted); }
+  #help { background: var(--panel); border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.5; text-align: left; }
+  #help p { margin: 0 0 6px; } #help p:last-child { margin: 0; }
+  #help b { color: var(--puck); }
+  #winText { font-size: clamp(40px, 10vw, 64px); font-weight: 900; font-style: italic; line-height: 1; }
+  #finalScore { font-size: 22px; font-weight: 800; color: var(--muted); }
+
+  #hud { position: fixed; top: max(8px, env(safe-area-inset-top)); right: 8px; display: flex; gap: 6px; }
+  #hud button { width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--panel); font-size: 17px; font-weight: 900; }
+  #toast { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); background: var(--panel); border: 2px solid var(--puck);
+    border-radius: 12px; padding: 9px 14px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity 0.25s; max-width: 92vw; text-align: center; z-index: 5; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="hidden"><button id="pauseBtn" aria-label="Pause">II</button><button id="fsBtn" aria-label="Full screen">⛶</button></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="menu" class="screen">
+  <div class="box">
+    <h1><span class="a">AIR</span><span class="b">HOCKEY</span></h1>
+    <p class="sub">Slide your paddle, smash the puck into the other goal. First to 7 wins.</p>
+    <div class="label">Players</div>
+    <div class="seg" id="modeSeg"><button data-mode="1">1 Player</button><button data-mode="2">2 Players</button></div>
+    <div id="diffWrap">
+      <div class="label" style="margin-bottom:8px">Computer</div>
+      <div class="seg" id="diffSeg"><button data-diff="0">Easy</button><button data-diff="1">Medium</button><button data-diff="2">Hard</button></div>
+    </div>
+    <div id="record"></div>
+    <button class="big" id="playBtn">Play</button>
+    <div class="row"><button class="ghost" id="helpBtn">How to play</button><button class="ghost" id="soundBtn">Sound: on</button></div>
+    <button class="ghost" id="fsMenuBtn">⛶ Full screen</button>
+    <div id="help" class="hidden"></div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="box">
+    <h1 style="font-size:52px"><span class="a">PAUSED</span></h1>
+    <button class="big" id="resumeBtn">Resume</button>
+    <button class="ghost" id="quitBtn">Quit to menu</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="box">
+    <div id="winText"></div>
+    <div id="finalScore"></div>
+    <div id="overNote" class="sub"></div>
+    <button class="big" id="againBtn">Play again</button>
+    <button class="ghost" id="menuBtn">Menu</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const $ = id => document.getElementById(id);
+  const canvas = $("c"), ctx = canvas.getContext("2d");
+
+  // =====================================================================
+  // Table (in table units). P1 defends y = 0, P2 / computer defends y = L.
+  // =====================================================================
+  const W = 600, L = 1000, GOAL = 220, RP = 44, RK = 26, WIN = 7, MAXV = 2100;
+  const COLORS = { p1: "#2de2ff", p2: "#ff3d8b", puck: "#ffd23f" };
+  const AI = [
+    { name: "Easy", speed: 400, react: 2.8, aimErr: 120, guardErr: 95 },
+    { name: "Medium", speed: 640, react: 5, aimErr: 60, guardErr: 60 },
+    { name: "Hard", speed: 980, react: 10, aimErr: 18, guardErr: 28 },
+  ];
+
+  const save = { mode: 1, diff: 1, sound: true, record: [[0, 0], [0, 0], [0, 0]] };
+  function persist() { try { const p = window.storage.set("airhockey-save", JSON.stringify(save), false); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  async function restore() {
+    try {
+      const r = await window.storage.get("airhockey-save", false);
+      if (r && r.value) {
+        const d = JSON.parse(r.value);
+        if (d.mode === 1 || d.mode === 2) save.mode = d.mode;
+        if ([0, 1, 2].includes(d.diff)) save.diff = d.diff;
+        if (typeof d.sound === "boolean") save.sound = d.sound;
+        if (Array.isArray(d.record) && d.record.length === 3) save.record = d.record.map(x => [x[0] | 0, x[1] | 0]);
+      }
+    } catch (e) {}
+    renderMenu();
+  }
+
+  // =====================================================================
+  // Game state
+  // =====================================================================
+  const paddles = [
+    { x: W / 2, y: 120, vx: 0, vy: 0, tx: W / 2, ty: 120, color: COLORS.p1 },
+    { x: W / 2, y: L - 120, vx: 0, vy: 0, tx: W / 2, ty: L - 120, color: COLORS.p2 },
+  ];
+  const puck = { x: W / 2, y: L / 2, vx: 0, vy: 0 };
+  const trail = [];
+  const sparks = [];
+  let score = [0, 0], state = "menu", t = 0, freezeUntil = 0, goalFlash = null, countdown = 0, shake = 0;
+  let aiAim = W / 2, aiGuard = 0, aiSide = 0, aiStuck = 0, lastHit = 0, pending = null;   // pending = { at, kind: 'serve' | 'over', who }
+
+  function resetPositions(serveTo) {
+    paddles[0].x = paddles[0].tx = W / 2; paddles[0].y = paddles[0].ty = 120; paddles[0].vx = paddles[0].vy = 0;
+    paddles[1].x = paddles[1].tx = W / 2; paddles[1].y = paddles[1].ty = L - 120; paddles[1].vx = paddles[1].vy = 0;
+    puck.x = W / 2; puck.vx = puck.vy = 0;
+    puck.y = serveTo === 0 ? L * 0.3 : serveTo === 1 ? L * 0.7 : L / 2 + (Math.random() < 0.5 ? -110 : 110);
+    trail.length = 0;
+  }
+  function startMatch() {
+    score = [0, 0]; pending = null;
+    resetPositions(-1);
+    state = "play"; countdown = 3; freezeUntil = t + 3;
+    show(null);
+    $("hud").classList.remove("hidden");
+    focusGame();
+    beep(660, 0.09);
+  }
+
+  // =====================================================================
+  // Layout: portrait = goals top and bottom, landscape = goals left and right
+  // =====================================================================
+  let dpr = 1, landscape = false, s = 1, ox = 0, oy = 0;
+  function layout() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    landscape = innerWidth > innerHeight;
+    const pad = 70;
+    if (landscape) {
+      s = Math.min((innerWidth - pad * 1.4) / L, (innerHeight - pad) / W);
+      ox = (innerWidth - L * s) / 2; oy = (innerHeight - W * s) / 2;
+    } else {
+      s = Math.min((innerWidth - pad) / W, (innerHeight - pad * 1.4) / L);
+      ox = (innerWidth - W * s) / 2; oy = (innerHeight - L * s) / 2;
+    }
+  }
+  addEventListener("resize", layout); layout();
+  function tableTransform() {
+    if (landscape) ctx.setTransform(0, s * dpr, s * dpr, 0, ox * dpr, oy * dpr);
+    else ctx.setTransform(s * dpr, 0, 0, -s * dpr, ox * dpr, (oy + L * s) * dpr);
+  }
+  function toTable(sx, sy) {
+    return landscape ? { x: (sy - oy) / s, y: (sx - ox) / s } : { x: (sx - ox) / s, y: L - (sy - oy) / s };
+  }
+  function toScreen(x, y) {
+    return landscape ? { x: ox + y * s, y: oy + x * s } : { x: ox + x * s, y: oy + (L - y) * s };
+  }
+
+  // =====================================================================
+  // Input: fingers / mouse drive paddles directly, keys push them
+  // =====================================================================
+  const pointers = new Map();     // pointerId -> player index
+  const keys = {};
+  canvas.addEventListener("pointerdown", e => {
+    focusGame();
+    if (state !== "play") return;
+    const p = toTable(e.clientX, e.clientY);
+    let who = 0;
+    if (save.mode === 2) who = p.y < L / 2 ? 0 : 1;
+    else if ([...pointers.values()].includes(0)) return;
+    pointers.set(e.pointerId, who);
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    paddles[who].tx = p.x; paddles[who].ty = p.y;
+  });
+  canvas.addEventListener("pointermove", e => {
+    let who = pointers.get(e.pointerId);
+    if (who === undefined) {
+      // a mouse hovering (no button) also steers player 1 in 1-player mode
+      if (e.pointerType !== "mouse" || save.mode !== 1 || state !== "play") return;
+      who = 0;
+    }
+    const p = toTable(e.clientX, e.clientY);
+    paddles[who].tx = p.x; paddles[who].ty = p.y;
+  });
+  const lift = e => pointers.delete(e.pointerId);
+  canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift);
+
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if (k.startsWith("arrow") || k === " ") e.preventDefault();
+    keys[k] = true;
+    if (e.repeat) return;
+    if (k === "escape" || k === "p") { if (state === "play") pauseGame(); else if (state === "pause") resume(); }
+    else if (k === "enter" || k === " ") { if (state === "menu") startMatch(); else if (state === "over") startMatch(); else if (state === "pause") resume(); }
+    else if (k === "f") toggleFull();
+  });
+  addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+  addEventListener("blur", () => { for (const k in keys) keys[k] = false; pointers.clear(); if (state === "play") pauseGame(); });
+
+  // Keys move the paddle the way the keys point ON SCREEN, whichever way the table is turned
+  function keyVector(up, down, left, right) {
+    const sx = (keys[right] ? 1 : 0) - (keys[left] ? 1 : 0), sy = (keys[down] ? 1 : 0) - (keys[up] ? 1 : 0);
+    if (!sx && !sy) return null;
+    return landscape ? { x: sy, y: sx } : { x: sx, y: -sy };
+  }
+
+  // =====================================================================
+  // Physics
+  // =====================================================================
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  function limitPaddle(p, who) {
+    p.x = clamp(p.x, RP, W - RP);
+    p.y = who === 0 ? clamp(p.y, RP, L / 2 - RP) : clamp(p.y, L / 2 + RP, L - RP);
+    for (const [cx, cy] of [[80, 80], [W - 80, 80], [80, L - 80], [W - 80, L - 80]]) {
+      const inX = cx < W / 2 ? p.x < cx : p.x > cx, inY = cy < L / 2 ? p.y < cy : p.y > cy;
+      if (!inX || !inY) continue;
+      const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy), max = 80 - RP;
+      if (d > max) { p.x = cx + dx / d * max; p.y = cy + dy / d * max; }
+    }
+  }
+  function movePaddle(p, who, dt, maxSpeed) {
+    const ox0 = p.x, oy0 = p.y;
+    const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy), step = maxSpeed * dt;
+    if (d > step) { p.x += dx / d * step; p.y += dy / d * step; } else { p.x = p.tx; p.y = p.ty; }
+    limitPaddle(p, who);
+    p.vx = (p.x - ox0) / dt; p.vy = (p.y - oy0) / dt;
+  }
+  function hitPaddle(p) {
+    const dx = puck.x - p.x, dy = puck.y - p.y, d = Math.hypot(dx, dy), min = RP + RK;
+    if (d >= min || d < 0.001) return false;
+    const nx = dx / d, ny = dy / d;
+    puck.x = p.x + nx * min; puck.y = p.y + ny * min;
+    const rvx = puck.vx - p.vx, rvy = puck.vy - p.vy, along = rvx * nx + rvy * ny;
+    if (along < 0) {
+      // Against a wall the puck is trapped: no bounce, it just gets pushed along (like a real pinned puck)
+      const pinned = pushedIntoWall(nx, ny) && Math.hypot(puck.vx, puck.vy) < 400;
+      const e = pinned ? 1.0 : 1.9;
+      puck.vx -= e * along * nx; puck.vy -= e * along * ny;
+      const cap = pinned ? 320 : MAXV, sp = Math.hypot(puck.vx, puck.vy);
+      if (sp > cap) { puck.vx *= cap / sp; puck.vy *= cap / sp; }
+      if (t - lastHit > 0.06) { hitSound(Math.min(1, Math.abs(along) / 1400)); burst(puck.x - nx * RK, puck.y - ny * RK, p.color, 6 + Math.min(14, Math.abs(along) / 90)); lastHit = t; }
+    }
+    return true;
+  }
+  const inMouth = x => Math.abs(x - W / 2) < GOAL / 2 - RK * 0.25;
+  // Trapped only if the paddle is pushing the puck INTO a wall; shots along the wall are fine
+  const pushedIntoWall = (nx, ny) => (puck.x <= RK + 1.5 && nx < -0.35) || (puck.x >= W - RK - 1.5 && nx > 0.35) ||
+    (!inMouth(puck.x) && ((puck.y <= RK + 1.5 && ny < -0.35) || (puck.y >= L - RK - 1.5 && ny > 0.35)));
+  const againstWall = () => puck.x <= RK + 1.5 || puck.x >= W - RK - 1.5 || ((puck.y <= RK + 1.5 || puck.y >= L - RK - 1.5) && !inMouth(puck.x));
+  function bounceCorner(cx, cy) {
+    const dx = puck.x - cx, dy = puck.y - cy, d = Math.hypot(dx, dy);
+    if (d < RK && d > 0.001) {
+      const nx = dx / d, ny = dy / d, along = puck.vx * nx + puck.vy * ny;
+      puck.x = cx + nx * RK; puck.y = cy + ny * RK;
+      if (along < 0) { puck.vx -= 1.8 * along * nx; puck.vy -= 1.8 * along * ny; wallSound(); }
+    }
+  }
+  function stepPuck(dt) {
+    puck.x += puck.vx * dt; puck.y += puck.vy * dt;
+    // side walls
+    if (puck.x < RK) { puck.x = RK; if (puck.vx < 0) { puck.vx = -puck.vx * 0.9; wallSound(); } }
+    if (puck.x > W - RK) { puck.x = W - RK; if (puck.vx > 0) { puck.vx = -puck.vx * 0.9; wallSound(); } }
+    // end walls, except the goal mouths
+    if (puck.y < RK && !inMouth(puck.x) && puck.y > -RK) { puck.y = RK; if (puck.vy < 0) { puck.vy = -puck.vy * 0.9; wallSound(); } }
+    if (puck.y > L - RK && !inMouth(puck.x) && puck.y < L + RK) { puck.y = L - RK; if (puck.vy > 0) { puck.vy = -puck.vy * 0.9; wallSound(); } }
+    for (const cy of [0, L]) { bounceCorner(W / 2 - GOAL / 2, cy); bounceCorner(W / 2 + GOAL / 2, cy); }
+    roundCorners();
+    // inside a goal pocket, keep it between the posts
+    if (puck.y < 0 || puck.y > L) puck.x = clamp(puck.x, W / 2 - GOAL / 2 + RK, W / 2 + GOAL / 2 - RK);
+  }
+
+  // Each time the puck comes over, the computer picks a shot: a corner, a bank off a side wall, or straight on
+  function pickAim() {
+    const r = Math.random(), lv = AI[save.diff];
+    let gx;
+    if (r < 0.45) gx = W / 2 + (Math.random() < 0.5 ? -1 : 1) * (GOAL / 2 - 30);
+    else if (r < 0.8) gx = Math.random() < 0.5 ? -W / 2 : W * 1.5;      // aim at the goal's mirror image = bank shot
+    else gx = W / 2;
+    aiAim = gx + (Math.random() - 0.5) * 2 * lv.aimErr;
+  }
+  // The puck can never be pushed through a wall: if it's squeezed, the paddle gives way instead
+  // Rounded corners (like a real table) so the puck can't get stuck in a corner
+  const CR = 80;
+  function roundCorners() {
+    for (const [cx, cy] of [[CR, CR], [W - CR, CR], [CR, L - CR], [W - CR, L - CR]]) {
+      const inX = cx < W / 2 ? puck.x < cx : puck.x > cx, inY = cy < L / 2 ? puck.y < cy : puck.y > cy;
+      if (!inX || !inY) continue;
+      const dx = puck.x - cx, dy = puck.y - cy, d = Math.hypot(dx, dy), max = CR - RK;
+      if (d <= max) continue;
+      const nx = dx / d, ny = dy / d;
+      puck.x = cx + nx * max; puck.y = cy + ny * max;
+      const out = puck.vx * nx + puck.vy * ny;
+      if (out > 0) { puck.vx -= 1.85 * out * nx; puck.vy -= 1.85 * out * ny; if (out > 200) wallSound(); }
+    }
+  }
+  function confinePuck() {
+    roundCorners();
+    if (puck.x < RK) { puck.x = RK; puck.vx = Math.max(0, puck.vx); }
+    if (puck.x > W - RK) { puck.x = W - RK; puck.vx = Math.min(0, puck.vx); }
+    if (!inMouth(puck.x)) {
+      if (puck.y < RK) { puck.y = RK; puck.vy = Math.max(0, puck.vy); }
+      if (puck.y > L - RK) { puck.y = L - RK; puck.vy = Math.min(0, puck.vy); }
+    }
+  }
+  function giveWay(p, who) {
+    const dx = p.x - puck.x, dy = p.y - puck.y, d = Math.hypot(dx, dy), min = RP + RK;
+    if (d >= min) return;
+    const nx = d > 0.001 ? dx / d : 0, ny = d > 0.001 ? dy / d : (who === 0 ? -1 : 1);
+    p.x = puck.x + nx * min; p.y = puck.y + ny * min;
+    limitPaddle(p, who);
+  }
+  function updateAI(dt) {
+    const p = paddles[1], lv = AI[save.diff];
+    const side = puck.y > L / 2 ? 1 : 0;
+    if (side && !aiSide) pickAim();
+    if (!side && aiSide) aiGuard = (Math.random() - 0.5) * 2 * lv.guardErr;
+    aiSide = side;
+    const slow = Math.hypot(puck.vx, puck.vy) < 60;
+    aiStuck = puck.y > L / 2 && slow ? aiStuck + dt : 0;
+    let tx, ty;
+    if (puck.y > L / 2 - 30 && (puck.vy > -260 || puck.y > L * 0.68)) {
+      // Attack: get behind the puck on the line toward the player's goal, then drive through it
+      const gx = aiAim, gy = -60;
+      const dx = puck.x - gx, dy = puck.y - gy, d = Math.hypot(dx, dy) || 1;
+      let bx = puck.x + dx / d * (RP + RK + 4), by = puck.y + dy / d * (RP + RK + 4);
+      bx = clamp(bx, RP, W - RP); by = clamp(by, L / 2 + RP, L - RP);      // can't stand inside a wall
+      const ready = Math.hypot(p.x - bx, p.y - by) < 30 || aiStuck > 1.2;
+      tx = ready ? puck.x - dx / d * 60 : bx; ty = ready ? puck.y - dy / d * 60 : by;
+      if (puck.y > p.y + 10 && !ready) { tx = puck.x + (puck.x < W / 2 ? 70 : -70); ty = Math.min(L - RP, puck.y + 70); }
+    } else {
+      // Defend: sit between the puck and our goal
+      const t2 = puck.vy > 0 ? Math.min(1.2, (L - 110 - puck.y) / Math.max(1, puck.vy)) : 0;
+      const px = clamp(puck.x + puck.vx * t2 * 0.6, RP, W - RP);
+      tx = W / 2 + (px - W / 2) * 0.55 + aiGuard; ty = L - 110;
+    }
+    const k = Math.min(1, dt * lv.react);
+    p.tx += (tx - p.tx) * k; p.ty += (ty - p.ty) * k;
+    movePaddle(p, 1, dt, lv.speed);
+  }
+
+  function update(dt) {
+    if (state !== "play") return;
+    t += dt;
+    if (pending && t >= pending.at) {
+      const p = pending; pending = null;
+      if (p.kind === "serve") resetPositions(p.who); else { gameOver(p.who); return; }
+    }
+    if (countdown > 0) {
+      const before = Math.ceil(countdown);
+      countdown -= dt;
+      if (Math.ceil(countdown) !== before && countdown > 0) beep(660, 0.09);
+      if (countdown <= 0) beep(990, 0.14);
+    }
+    const frozen = t < freezeUntil;
+    // Player paddles
+    const kv1 = keyVector("w", "s", "a", "d") || (save.mode === 1 ? keyVector("arrowup", "arrowdown", "arrowleft", "arrowright") : null);
+    if (kv1) { paddles[0].tx = paddles[0].x + kv1.x * 60; paddles[0].ty = paddles[0].y + kv1.y * 60; }
+    if (save.mode === 2) {
+      const kv2 = keyVector("arrowup", "arrowdown", "arrowleft", "arrowright");
+      if (kv2) { paddles[1].tx = paddles[1].x + kv2.x * 60; paddles[1].ty = paddles[1].y + kv2.y * 60; }
+    }
+    const steps = 6, h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      movePaddle(paddles[0], 0, h, kv1 ? 950 : 3600);
+      if (save.mode === 2) movePaddle(paddles[1], 1, h, 3600); else updateAI(h);
+      if (frozen) { paddles[0].vx = paddles[0].vy = paddles[1].vx = paddles[1].vy = 0; continue; }
+      stepPuck(h);
+      hitPaddle(paddles[0]); hitPaddle(paddles[1]);
+      confinePuck(); giveWay(paddles[0], 0); giveWay(paddles[1], 1);
+    }
+    if (!frozen) {
+      const f = Math.pow(0.82, dt); puck.vx *= f; puck.vy *= f;
+      if (Math.hypot(puck.vx, puck.vy) < 25 && (puck.x < RK + 6 || puck.x > W - RK - 6)) puck.vx += (puck.x < W / 2 ? 30 : -30) * dt;
+      if (puck.y < -RK * 1.2) goal(1);
+      else if (puck.y > L + RK * 1.2) goal(0);
+    }
+    trail.push({ x: puck.x, y: puck.y }); if (trail.length > 12) trail.shift();
+  }
+
+  function goal(scorer) {
+    score[scorer]++;
+    goalFlash = { who: scorer, at: t };
+    shake = 0.35;
+    goalSound(scorer === 0 || save.mode === 2);
+    burst(W / 2, scorer === 0 ? L : 0, scorer === 0 ? COLORS.p1 : COLORS.p2, 40);
+    if (score[scorer] >= WIN) { freezeUntil = t + 99; pending = { at: t + 1.2, kind: "over", who: scorer }; return; }
+    freezeUntil = t + 1.2;
+    pending = { at: t + 0.7, kind: "serve", who: scorer === 0 ? 1 : 0 };
+  }
+
+  function gameOver(winner) {
+    if (state !== "play") return;
+    state = "over";
+    $("hud").classList.add("hidden");
+    pointers.clear();
+    const two = save.mode === 2;
+    $("winText").textContent = two ? (winner === 0 ? "BLUE WINS!" : "PINK WINS!") : (winner === 0 ? "YOU WIN!" : "COMPUTER WINS");
+    $("winText").style.color = winner === 0 ? COLORS.p1 : COLORS.p2;
+    $("finalScore").textContent = score[0] + " – " + score[1];
+    if (!two) {
+      save.record[save.diff][winner === 0 ? 0 : 1]++; persist();
+      const r = save.record[save.diff];
+      $("overNote").textContent = AI[save.diff].name + " record: " + r[0] + " wins, " + r[1] + " losses" + (winner === 0 && save.diff < 2 ? ". Ready for " + AI[save.diff + 1].name + "?" : "");
+    } else $("overNote").textContent = "";
+    show("over");
+    if (winner === 0 || two) cheer();
+  }
+
+  // =====================================================================
+  // Drawing
+  // =====================================================================
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 120 + Math.random() * 520;
+      sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: 0.25 + Math.random() * 0.35, color });
+    }
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function drawPaddle(p) {
+    ctx.save();
+    ctx.shadowColor = p.color; ctx.shadowBlur = 26;
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, RP, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.arc(p.x, p.y, RP * 0.72, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, RP * 0.42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.beginPath(); ctx.arc(p.x - 6, p.y + 6, RP * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#07070d"; ctx.fillRect(0, 0, innerWidth, innerHeight);
+    tableTransform();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 14 * shake, (Math.random() - 0.5) * 14 * shake);
+
+    // Rim + surface
+    ctx.fillStyle = "#1a1c2b"; roundRect(-34, -34, W + 68, L + 68, 104); ctx.fill();
+    const grd = ctx.createLinearGradient(0, 0, 0, L);
+    grd.addColorStop(0, "#0e1a33"); grd.addColorStop(0.5, "#101d3b"); grd.addColorStop(1, "#0e1a33");
+    ctx.fillStyle = grd; roundRect(0, 0, W, L, 80); ctx.fill();
+    // Air holes
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    for (let y = 30; y < L; y += 34) for (let x = 30 + ((y / 34) % 2) * 17; x < W; x += 34) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    // Markings
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(45,226,255,0.55)"; ctx.beginPath(); ctx.moveTo(0, L / 2 - 2); ctx.lineTo(W, L / 2 - 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,61,139,0.55)"; ctx.beginPath(); ctx.moveTo(0, L / 2 + 2); ctx.lineTo(W, L / 2 + 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(W / 2, L / 2, 90, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(45,226,255,0.4)"; ctx.beginPath(); ctx.arc(W / 2, 0, 130, 0, Math.PI); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,61,139,0.4)"; ctx.beginPath(); ctx.arc(W / 2, L, 130, Math.PI, Math.PI * 2); ctx.stroke();
+    // Goals
+    for (const [gy, col] of [[0, COLORS.p1], [L, COLORS.p2]]) {
+      ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 24; ctx.fillStyle = "#05050a";
+      ctx.fillRect(W / 2 - GOAL / 2, gy === 0 ? -30 : L, GOAL, 30);
+      ctx.fillStyle = col; ctx.fillRect(W / 2 - GOAL / 2, gy === 0 ? -6 : L, GOAL, 6); ctx.restore();
+    }
+    // Big scores on each half
+    drawScores();
+    tableTransform();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 14 * shake, (Math.random() - 0.5) * 14 * shake);
+
+    // Puck trail + puck
+    for (let i = 0; i < trail.length; i++) {
+      const a = (i + 1) / trail.length;
+      ctx.fillStyle = `rgba(255,210,63,${a * 0.22})`;
+      ctx.beginPath(); ctx.arc(trail[i].x, trail[i].y, RK * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.save(); ctx.shadowColor = COLORS.puck; ctx.shadowBlur = 22;
+    ctx.fillStyle = COLORS.puck; ctx.beginPath(); ctx.arc(puck.x, puck.y, RK, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(puck.x, puck.y, RK * 0.62, 0, Math.PI * 2); ctx.stroke();
+
+    drawPaddle(paddles[0]); drawPaddle(paddles[1]);
+
+    for (const sp of sparks) {
+      const a = 1 - sp.life / sp.max;
+      ctx.fillStyle = sp.color; ctx.globalAlpha = Math.max(0, a);
+      ctx.fillRect(sp.x - 3, sp.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+
+    // Screen-space overlays
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (goalFlash && t - goalFlash.at < 1.1) {
+      const a = 1 - (t - goalFlash.at) / 1.1, col = goalFlash.who === 0 ? COLORS.p1 : COLORS.p2;
+      ctx.fillStyle = col; ctx.globalAlpha = a * 0.18; ctx.fillRect(0, 0, innerWidth, innerHeight); ctx.globalAlpha = 1;
+    }
+  }
+  function text(str, x, y, size, color, alpha) {
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha); ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 24;
+    ctx.font = `italic 900 ${size}px Avenir Next, Segoe UI, system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(str, x, y); ctx.restore();
+  }
+  function drawScores() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const size = Math.min(W, L / 2) * s * 0.42;
+    for (const who of [0, 1]) {
+      const c = toScreen(W / 2, who === 0 ? L * 0.25 : L * 0.75);
+      ctx.save(); ctx.globalAlpha = 0.13; ctx.fillStyle = who === 0 ? COLORS.p1 : COLORS.p2;
+      ctx.font = `italic 900 ${size}px Avenir Next, Segoe UI, system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(score[who]), c.x, c.y); ctx.restore();
+    }
+  }
+
+  // =====================================================================
+  // Sound
+  // =====================================================================
+  let actx = null, noiseBuf = null;
+  function initAudio() {
+    if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { actx = null; }
+  }
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const st = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, st); o.frequency.exponentialRampToValueAtTime(f1, st + dur);
+    g.gain.setValueAtTime(vol, st); g.gain.exponentialRampToValueAtTime(0.001, st + dur);
+    o.connect(g); g.connect(actx.destination); o.start(st); o.stop(st + dur + 0.03);
+  }
+  function noise(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const st = actx.currentTime + delay, src = actx.createBufferSource(); src.buffer = noiseBuf;
+    const f = actx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(f0, st); f.frequency.exponentialRampToValueAtTime(f1, st + dur);
+    const g = actx.createGain(); g.gain.setValueAtTime(vol, st); g.gain.exponentialRampToValueAtTime(0.001, st + dur);
+    src.connect(f); f.connect(g); g.connect(actx.destination); src.start(st, Math.random() * 0.5); src.stop(st + dur + 0.03);
+  }
+  let lastWall = 0;
+  const hitSound = k => { tone("triangle", 520 + k * 500, 220, 0.07, 0.18 + k * 0.2); noise("highpass", 3000, 1500, 0.04, 0.1 + k * 0.15); };
+  const wallSound = () => { if (t - lastWall < 0.05) return; lastWall = t; tone("sine", 190, 90, 0.08, 0.16); };
+  const beep = (f, d) => tone("square", f, f, d, 0.08);
+  function goalSound(good) {
+    tone("sawtooth", good ? 440 : 300, good ? 880 : 150, 0.35, 0.14);
+    tone("square", good ? 660 : 220, good ? 1320 : 110, 0.3, 0.07, 0.08);
+  }
+  function cheer() { for (let i = 0; i < 16; i++) noise("bandpass", 900 + Math.random() * 1500, 700, 0.6 + Math.random() * 0.6, 0.06, Math.random() * 0.5); }
+
+  // =====================================================================
+  // Menus
+  // =====================================================================
+  function show(id) { for (const s2 of ["menu", "pause", "over"]) $(s2).classList.toggle("hidden", s2 !== id); }
+  function renderMenu() {
+    for (const b of $("modeSeg").children) b.setAttribute("aria-pressed", Number(b.dataset.mode) === save.mode);
+    for (const b of $("diffSeg").children) b.setAttribute("aria-pressed", Number(b.dataset.diff) === save.diff);
+    $("diffWrap").classList.toggle("hidden", save.mode !== 1);
+    const r = save.record[save.diff];
+    $("record").textContent = save.mode === 1 ? (r[0] + r[1] ? `Your ${AI[save.diff].name} record: ${r[0]} wins, ${r[1]} losses` : "")
+      : "Hand the iPad to a friend: Blue plays from the near side, Pink from the far side.";
+    $("soundBtn").textContent = "Sound: " + (save.sound ? "on" : "off");
+  }
+  for (const b of $("modeSeg").children) b.addEventListener("click", () => { save.mode = Number(b.dataset.mode); persist(); renderMenu(); });
+  for (const b of $("diffSeg").children) b.addEventListener("click", () => { save.diff = Number(b.dataset.diff); persist(); renderMenu(); });
+  $("help").innerHTML = `<p><b>Touch:</b> put your finger on your half of the table and slide. In 2 Players, each person uses their own half.</p>
+    <p><b>Mouse:</b> move the mouse to steer your paddle.</p>
+    <p><b>Keyboard:</b> WASD or arrow keys. In 2 Players, Blue uses WASD and Pink uses the arrows.</p>
+    <p><b>P</b> or <b>Esc</b> pause · <b>F</b> full screen · <b>Enter</b> play</p>`;
+  $("helpBtn").addEventListener("click", () => $("help").classList.toggle("hidden"));
+  $("soundBtn").addEventListener("click", () => { save.sound = !save.sound; persist(); renderMenu(); });
+  $("playBtn").addEventListener("click", () => { initAudio(); startMatch(); });
+  $("againBtn").addEventListener("click", () => { initAudio(); startMatch(); });
+  $("menuBtn").addEventListener("click", toMenu);
+  $("quitBtn").addEventListener("click", toMenu);
+  $("resumeBtn").addEventListener("click", resume);
+  $("pauseBtn").addEventListener("click", pauseGame);
+  function toMenu() { state = "menu"; $("hud").classList.add("hidden"); renderMenu(); show("menu"); resetPositions(-1); }
+  function pauseGame() { if (state !== "play") return; state = "pause"; pointers.clear(); show("pause"); }
+  function resume() { if (state !== "pause") return; state = "play"; show(null); freezeUntil = Math.max(freezeUntil, t + 0.4); focusGame(); }
+  function focusGame() { try { window.focus(); canvas.tabIndex = 0; canvas.focus({ preventScroll: true }); } catch (e) {} }
+
+  // Full screen
+  const root = document.documentElement;
+  let toastTimer;
+  function toast(msg) { const el = $("toast"); el.textContent = msg; el.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.style.opacity = 0, 4500); }
+  async function toggleFull() {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else if (root.requestFullscreen && document.fullscreenEnabled !== false) await root.requestFullscreen({ navigationUI: "hide" });
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+      else throw 0;
+    } catch (e) { toast("This window didn't allow full screen. Try opening the game in its own browser tab."); }
+  }
+  $("fsBtn").addEventListener("click", toggleFull);
+  $("fsMenuBtn").addEventListener("click", toggleFull);
+  for (const ev of ["fullscreenchange", "webkitfullscreenchange"]) document.addEventListener(ev, layout);
+
+  // =====================================================================
+  // Loop
+  // =====================================================================
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
+    update(dt);
+    if (state !== "play") t += 0;
+    if (state === "menu") {        // gentle demo puck behind the menu
+      puck.x = W / 2 + Math.sin(now / 900) * 180; puck.y = L / 2 + Math.cos(now / 1300) * 300;
+    }
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const sp = sparks[i]; sp.life += dt; sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vx *= 0.9; sp.vy *= 0.9;
+      if (sp.life > sp.max) sparks.splice(i, 1);
+    }
+    shake = Math.max(0, shake - dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  renderMenu();
+  restore();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

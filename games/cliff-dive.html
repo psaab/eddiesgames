@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<script>
+/* Saving: use the host's storage when it has one (Claude preview); otherwise this browser's own storage. */
+(function () {
+  try { if (!window.storage && window.parent !== window && window.parent.storage) window.storage = window.parent.storage; } catch (e) {}
+  if (!window.storage) {
+    window.storage = {
+      get: async function (k) { try { var v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; } catch (e) { return null; } },
+      set: async function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} return { key: k, value: v }; }
+    };
+  }
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Cliff Dive</title>
+<style>
+  :root {
+    --sea: #0b5d6b;
+    --sea-deep: #073e49;
+    --surf: #1aa3b8;
+    --sand: #f4d58d;
+    --coral: #ff5a4e;
+    --ink: #ffffff;
+    --muted: rgba(255, 255, 255, 0.72);
+    --panel: rgba(7, 62, 73, 0.82);
+    --panel-solid: #073e49;
+    --line: rgba(255, 255, 255, 0.18);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --panel: rgba(3, 30, 36, 0.88);
+      --panel-solid: #04262d;
+      --muted: rgba(255, 255, 255, 0.68);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--sea-deep); color: var(--ink);
+    font-family: "Avenir Next Condensed", "Avenir Next", "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  canvas:focus { outline: none; }
+  .hidden { display: none !important; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--sand); outline-offset: 2px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- Menu: the cliff ladder ---------- */
+  #menu { position: fixed; inset: 0; display: flex; align-items: center; padding: 24px max(24px, env(safe-area-inset-left));
+    background: linear-gradient(90deg, rgba(4, 38, 45, 0.86) 0%, rgba(4, 38, 45, 0.55) 46%, rgba(4, 38, 45, 0) 75%); }
+  .menuInner { width: min(430px, 100%); display: flex; flex-direction: column; gap: 16px; max-height: 100%; overflow-y: auto; }
+  .title { margin: 0; font-size: clamp(54px, 13vw, 96px); font-weight: 900; line-height: 0.86; letter-spacing: -2px; font-style: italic; }
+  .title span { display: block; color: var(--sand); }
+  .tag { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.4; max-width: 32ch; }
+  #ladder { display: flex; flex-direction: column; gap: 6px; position: relative; padding-left: 18px; }
+  #ladder::before { content: ""; position: absolute; left: 5px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--sand), var(--surf)); }
+  .rung { position: relative; display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 10px; text-align: left;
+    background: var(--panel); border: 2px solid transparent; border-radius: 12px; padding: 9px 12px; }
+  .rung::before { content: ""; position: absolute; left: -18px; top: 50%; width: 13px; height: 13px; margin-top: -6.5px; border-radius: 50%;
+    background: var(--panel-solid); border: 3px solid var(--surf); }
+  .rung .h { font-size: 26px; font-weight: 900; font-style: italic; }
+  .rung .h small { font-size: 14px; font-weight: 700; }
+  .rung .n { font-size: 16px; font-weight: 700; }
+  .rung .b { font-size: 13px; color: var(--muted); text-align: right; }
+  .rung[aria-pressed="true"] { border-color: var(--sand); }
+  .rung[aria-pressed="true"]::before { background: var(--sand); border-color: var(--sand); }
+  .rung:disabled { opacity: 0.5; cursor: default; }
+  .big { border: 0; border-radius: 14px; padding: 15px 22px; font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: 0.5px;
+    background: var(--coral); color: #fff; box-shadow: 0 5px 0 #a8302a; }
+  .big:active { transform: translateY(4px); box-shadow: 0 1px 0 #a8302a; }
+  .row { display: flex; gap: 8px; }
+  .ghost { flex: 1; border: 2px solid var(--line); background: var(--panel); border-radius: 12px; padding: 10px; font-weight: 800; font-size: 15px; }
+  #help { background: var(--panel); border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.5; }
+  #help b { color: var(--sand); }
+  #help p { margin: 0 0 6px; }
+  #help p:last-child { margin: 0; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #where { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 10px; background: var(--panel); border-radius: 12px; padding: 7px 12px; }
+  #where b { display: block; font-size: 20px; font-style: italic; }
+  #where span { font-size: 13px; color: var(--muted); }
+  #menuBtn { pointer-events: auto; position: fixed; top: max(10px, env(safe-area-inset-top)); right: 10px; border: 0; border-radius: 12px;
+    background: var(--panel); padding: 10px 14px; font-weight: 800; }
+  #spin { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); text-align: center;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.45); }
+  #spin b { display: block; font-size: clamp(30px, 6vw, 46px); font-weight: 900; font-style: italic; line-height: 1; }
+  #spin span { font-size: 14px; font-weight: 700; color: var(--muted); }
+  #alt { position: fixed; right: 16px; top: 22%; bottom: 30%; width: 10px; border-radius: 5px; background: rgba(255,255,255,0.2); }
+  #altFill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 5px; background: var(--sand); }
+  #altLabel { position: absolute; right: 16px; transform: translateY(50%); font-size: 15px; font-weight: 900; font-style: italic; white-space: nowrap;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+  #callout { position: fixed; left: 50%; top: 36%; transform: translate(-50%, -50%); font-size: clamp(30px, 8vw, 60px); font-weight: 900;
+    font-style: italic; color: var(--sand); text-shadow: 0 3px 0 rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.25s; white-space: nowrap; }
+  #hint { position: fixed; left: 50%; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); transform: translateX(-50%);
+    background: var(--panel); border-radius: 12px; padding: 8px 14px; font-size: 16px; font-weight: 700; text-align: center; max-width: 92vw; }
+
+  /* ---------- Touch buttons ---------- */
+  .pad { pointer-events: auto; position: fixed; border: 2px solid rgba(255,255,255,0.4); border-radius: 50%; background: var(--panel);
+    display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 15px; touch-action: none; text-align: center; line-height: 1.1; }
+  .pad.on { background: var(--sand); color: #3a2a00; border-color: var(--sand); }
+  #diveBtn { pointer-events: auto; position: fixed; left: 50%; bottom: max(22px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    width: min(320px, 80vw); }
+  #pTuck { right: 18px; bottom: 40px; width: 112px; height: 112px; font-size: 20px; background: rgba(255, 90, 78, 0.85); border-color: rgba(255,255,255,0.6); }
+  #trail { position: fixed; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; pointer-events: none;
+    border: 3px solid rgba(255,255,255,0.75); background: rgba(255,255,255,0.15); opacity: 0; transition: opacity 0.2s; }
+
+  /* ---------- Scorecard ---------- */
+  #score { position: fixed; left: 0; right: 0; bottom: max(16px, env(safe-area-inset-bottom)); display: flex; justify-content: center; padding: 0 12px; }
+  .card { width: min(640px, 100%); background: var(--panel-solid); border-radius: 18px; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+  .cardTop { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 14px 16px 10px;
+    background: linear-gradient(90deg, var(--sea), var(--surf)); }
+  #dName { font-size: 20px; font-weight: 900; font-style: italic; line-height: 1.15; }
+  #dSub { font-size: 14px; color: var(--muted); margin-top: 2px; }
+  #dd { text-align: right; flex: none; }
+  #dd b { display: block; font-size: 28px; font-weight: 900; font-style: italic; line-height: 1; }
+  #dd span { font-size: 12px; color: var(--muted); }
+  #judges { display: grid; grid-template-columns: repeat(3, 1fr) 1.3fr; }
+  .judge { padding: 12px 8px; text-align: center; border-right: 1px solid var(--line); opacity: 0; transform: translateY(10px);
+    transition: opacity 0.3s, transform 0.3s; }
+  .judge.in { opacity: 1; transform: none; }
+  .judge small { display: block; font-size: 12px; color: var(--muted); }
+  .judge b { font-size: 34px; font-weight: 900; font-style: italic; }
+  .judge.total b { color: var(--sand); font-size: 40px; }
+  #verdict { padding: 0 16px 6px; font-size: 16px; font-weight: 800; min-height: 1.4em; color: var(--sand); }
+  .cardBtns { display: flex; gap: 8px; padding: 6px 12px 12px; }
+  .cardBtns .big { flex: 1.4; font-size: 20px; padding: 12px; }
+  .cardBtns .ghost { flex: 1; }
+
+  #fade { position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(26, 163, 184, 0.35), rgba(4, 38, 45, 0.85)); opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+  @media (prefers-reduced-motion: reduce) { .judge, #callout, #fade { transition: none; } }
+  .fsBtn { flex: none; width: 100%; }
+  #fsHudBtn { pointer-events: auto; position: fixed; top: max(10px, env(safe-area-inset-top)); right: 92px; width: 44px; height: 42px;
+    border: 0; border-radius: 12px; background: var(--panel); font-size: 20px; line-height: 1; }
+  #toast { position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 10; max-width: min(460px, 92vw);
+    background: var(--panel-solid); border: 2px solid var(--sand); border-radius: 14px; padding: 10px 14px; font-size: 16px; font-weight: 700;
+    line-height: 1.35; text-align: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="fade"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- Menu -->
+<div id="menu">
+  <div class="menuInner">
+    <h1 class="title">Cliff<span>Dive</span></h1>
+    <p class="tag">Run off the edge, flip and twist on the way down, then straighten out before you hit the water.</p>
+    <div id="ladder" aria-label="Choose a cliff"></div>
+    <button class="big" id="goBtn">Climb up</button>
+    <div class="row">
+      <button class="ghost" id="helpBtn">How to dive</button>
+      <button class="ghost" id="soundBtn">Sound: on</button>
+    </div>
+    <button class="ghost fsBtn" id="fsMenuBtn">⛶ Full screen</button>
+    <div id="help" class="hidden"></div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="where"><b id="whereName"></b><span id="whereSub"></span></div>
+  <button id="menuBtn">Cliffs</button>
+  <button id="fsHudBtn" aria-label="Full screen">⛶</button>
+  <div id="spin" class="hidden"><b class="num" id="spinNum"></b><span id="spinSub"></span></div>
+  <div id="alt" class="hidden"><div id="altFill"></div><div id="altLabel" class="num"></div></div>
+  <div id="callout"></div>
+  <div id="trail"></div>
+  <div id="hint" class="hidden"></div>
+  <button class="big hidden" id="diveBtn">Dive</button>
+  <div id="pads" class="hidden">
+    <div class="pad" id="pTuck">TUCK</div>
+  </div>
+</div>
+
+<!-- Scorecard -->
+<div id="score" class="hidden">
+  <div class="card" role="dialog" aria-label="Dive score">
+    <div class="cardTop">
+      <div><div id="dName"></div><div id="dSub"></div></div>
+      <div id="dd"><b class="num" id="ddNum"></b><span>difficulty</span></div>
+    </div>
+    <div id="judges">
+      <div class="judge"><small>Judge 1</small><b class="num" id="j0"></b></div>
+      <div class="judge"><small>Judge 2</small><b class="num" id="j1"></b></div>
+      <div class="judge"><small>Judge 3</small><b class="num" id="j2"></b></div>
+      <div class="judge total"><small>Score</small><b class="num" id="jt"></b></div>
+    </div>
+    <div id="verdict"></div>
+    <div class="cardBtns">
+      <button class="big" id="againBtn">Dive again</button>
+      <button class="ghost" id="nextBtn">Next cliff</button>
+      <button class="ghost" id="cliffsBtn">Cliffs</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const $ = id => document.getElementById(id);
+
+  // =====================================================================
+  // Game constants
+  // =====================================================================
+  const U = 2.8;                       // world units per meter (diver is ~1.8 m tall)
+  const G = 9.8 * U;                   // gravity
+  const CLIFFS = [
+    { name: "Rock Ledge", m: 10, x: -18 },
+    { name: "Lighthouse Point", m: 15, x: -9 },
+    { name: "Eagle's Perch", m: 20, x: 0 },
+    { name: "Pro Platform", m: 27, x: 9 },
+    { name: "Legend's Leap", m: 35, x: 18 },
+  ];
+  const UNLOCK = 40;                   // score needed on your highest cliff to open the next one
+  const COM = 2.7;                     // diver's center above the feet
+
+  // =====================================================================
+  // Save data
+  // =====================================================================
+  const save = { unlocked: 1, best: CLIFFS.map(() => 0), dives: 0, sound: true, cliff: 0 };
+  function persist() {
+    try { const p = window.storage.set("cliffdive-save", JSON.stringify(save), false); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+  async function restore() {
+    try {
+      const r = await window.storage.get("cliffdive-save", false);
+      if (r && r.value) {
+        const d = JSON.parse(r.value);
+        Object.assign(save, d);
+        if (!Array.isArray(save.best) || save.best.length !== CLIFFS.length) save.best = CLIFFS.map((_, i) => (d.best && d.best[i]) || 0);
+        save.unlocked = Math.max(1, Math.min(CLIFFS.length, save.unlocked | 0));
+        save.cliff = Math.max(0, Math.min(save.unlocked - 1, save.cliff | 0));
+      }
+    } catch (e) {}
+    renderMenu();
+  }
+
+  // =====================================================================
+  // Three.js
+  // =====================================================================
+  const canvas = $("c");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xbfe6f5, 320, 1500);
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 3000);
+  scene.add(new THREE.HemisphereLight(0xdff4ff, 0x4a6a6a, 0.85));
+  const sun = new THREE.DirectionalLight(0xfff1d6, 1.0);
+  sun.position.set(-160, 260, 220);
+  scene.add(sun);
+  function resize() {
+    renderer.setSize(innerWidth, innerHeight, false);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  }
+  addEventListener("resize", resize); resize();
+
+  const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: o.rough ?? 0.8, metalness: o.metal ?? 0.02, flatShading: !!o.flat, vertexColors: !!o.vc });
+  const basic = (color, o = {}) => new THREE.MeshBasicMaterial({ color, fog: o.fog ?? true });
+  const add = (geo, mat, x = 0, y = 0, z = 0, parent = scene) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m; };
+
+  // ---------- Sky ----------
+  {
+    const geo = new THREE.SphereGeometry(2000, 32, 16);
+    const col = [], top = new THREE.Color(0x2f86d1), hor = new THREE.Color(0xcdeefa), low = new THREE.Color(0x8fd0e6), c = new THREE.Color();
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i) / 2000;
+      if (y > 0) c.copy(hor).lerp(top, Math.pow(y, 0.55)); else c.copy(hor).lerp(low, Math.min(1, -y * 4));
+      col.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })));
+    const sunDisc = add(new THREE.SphereGeometry(55, 24, 12), basic(0xfff4cf, { fog: false }));
+    sunDisc.position.copy(sun.position).normalize().multiplyScalar(1700);
+  }
+
+  // ---------- Water (waves move on the graphics card) ----------
+  const waterU = { uTime: { value: 0 } };
+  const WAVE_GLSL = `
+    uniform float uTime;
+    float waveH(vec2 p) {
+      return 0.35 * sin(p.x * 0.08 + uTime * 1.1) + 0.25 * sin(p.y * 0.11 - uTime * 1.4)
+           + 0.15 * sin((p.x + p.y) * 0.21 + uTime * 2.0) + 0.06 * sin(p.x * 0.6 - p.y * 0.5 + uTime * 3.1);
+    }`;
+  const waveH = (x, z, t) => 0.35 * Math.sin(x * 0.08 + t * 1.1) + 0.25 * Math.sin(z * 0.11 - t * 1.4)
+    + 0.15 * Math.sin((x + z) * 0.21 + t * 2.0) + 0.06 * Math.sin(x * 0.6 - z * 0.5 + t * 3.1);
+  {
+    const geo = new THREE.PlaneGeometry(4000, 4000, 220, 220); geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x1593ad, roughness: 0.18, metalness: 0.12 });
+    mat.onBeforeCompile = sh => {
+      sh.uniforms.uTime = waterU.uTime;
+      sh.vertexShader = WAVE_GLSL + "\n" + sh.vertexShader
+        .replace("#include <beginnormal_vertex>", `
+          float e = 0.6; vec2 wp = position.xz;
+          float h0 = waveH(wp), hx = waveH(wp + vec2(e, 0.0)), hz = waveH(wp + vec2(0.0, e));
+          vec3 objectNormal = normalize(vec3(h0 - hx, e, h0 - hz));
+          #ifdef USE_TANGENT
+            vec3 objectTangent = vec3(tangent.xyz);
+          #endif`)
+        .replace("#include <begin_vertex>", "vec3 transformed = vec3(position.x, position.y + waveH(position.xz), position.z);");
+    };
+    scene.add(new THREE.Mesh(geo, mat));
+    // Deeper color far out, lighter shallows near the cliff
+    const shallow = add(new THREE.CircleGeometry(70, 48), new THREE.MeshBasicMaterial({ color: 0x3fd0d6, transparent: true, opacity: 0.22, depthWrite: false }), 0, 0.45, -10);
+    shallow.rotation.x = -Math.PI / 2;
+  }
+
+  // ---------- Rock shapes (faceted, low-poly) ----------
+  function noise3(x, y, z, s) {
+    return Math.sin(x * 0.15 + s) * Math.cos(z * 0.13 + s * 1.7) * 0.5 + Math.sin(y * 0.21 + x * 0.07 + s * 2.3) * 0.35
+      + Math.sin(z * 0.37 - y * 0.19 + s) * 0.25 + Math.sin(x * 0.9 + y * 0.8 + z * 0.7 + s) * 0.12;
+  }
+  function rock(rTop, rBot, h, x, yBottom, z, seed, o = {}) {
+    let geo = new THREE.CylinderGeometry(rTop, rBot, h, o.seg || 22, o.hseg || 14);
+    const p = geo.attributes.position, v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const wy = v.y + h / 2 + yBottom;
+      const n = noise3(v.x + x, wy, v.z + z, seed);
+      const len = Math.hypot(v.x, v.z);
+      if (len > 0.01) { const k = 1 + (n * (o.rough || 3.2)) / len; v.x *= k; v.z *= k; }
+      if (v.y > h / 2 - 0.01) v.y += n * 2.5;
+      p.setXYZ(i, v.x, v.y, v.z);
+    }
+    geo = geo.toNonIndexed(); geo.computeVertexNormals();
+    const pos = geo.attributes.position, nor = geo.attributes.normal, col = [];
+    const cRock = new THREE.Color(o.rock || 0x9a8672), cDark = new THREE.Color(0x4a443e), cGrass = new THREE.Color(o.grass || 0x5f9e4a), cBand = new THREE.Color(o.band || 0xb3a088), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i += 3) {
+      const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3 + h / 2 + yBottom, ny = nor.getY(i);
+      if (ny > 0.62 && y > 3) c.copy(cGrass).offsetHSL(0, 0, (Math.sin(i) * 0.04));
+      else if (y < 2.5) c.copy(cDark);
+      else c.copy(Math.sin(y * 0.35) > 0.55 ? cBand : cRock).offsetHSL(0, 0, Math.sin(i * 1.7) * 0.035);
+      for (let k = 0; k < 3; k++) col.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    const m = add(geo, std(0xffffff, { vc: true, flat: true, rough: 0.95 }), x, yBottom + h / 2, z);
+    return m;
+  }
+
+  // ---------- The main cliff ----------
+  const CLIFF = { x: 0, z: -34, rTop: 27, rBot: 38, yBot: -10, h: 122 };
+  rock(CLIFF.rTop, CLIFF.rBot, CLIFF.h, CLIFF.x, CLIFF.yBot, CLIFF.z, 1.3, { rough: 3.4, seg: 26, hseg: 18 });
+  const radiusAt = y => CLIFF.rBot + (CLIFF.rTop - CLIFF.rBot) * Math.min(1, Math.max(0, (y - CLIFF.yBot) / CLIFF.h));
+  const frontAt = (x, y) => { const r = radiusAt(y); return CLIFF.z + Math.sqrt(Math.max(0, r * r - x * x)); };
+
+  // ---------- Platforms ----------
+  function heightLabel(text) {
+    const c = document.createElement("canvas"); c.width = 256; c.height = 96;
+    const g = c.getContext("2d");
+    g.fillStyle = "#ff5a4e"; g.fillRect(0, 0, 256, 96);
+    g.fillStyle = "#fff"; g.font = "italic 900 64px Avenir Next Condensed, Arial Narrow, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(text, 128, 52);
+    const tex = new THREE.CanvasTexture(c);
+    return new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.6), new THREE.MeshBasicMaterial({ map: tex }));
+  }
+  const platforms = CLIFFS.map((cl, i) => {
+    const H = cl.m * U, x = cl.x, front = frontAt(x, H) - 1.5;
+    const wood = std(0x9a6a3e), dark = std(0x5e3d22), metal = std(0xd0d4da, { metal: 0.6, rough: 0.35 }), white = std(0xffffff);
+    add(new THREE.BoxGeometry(5, 0.5, 10), wood, x, H - 0.25, front);
+    add(new THREE.BoxGeometry(5.02, 0.52, 0.45), white, x, H - 0.24, front + 4.8);
+    for (const sx of [-2, 2]) {
+      const a = new THREE.Vector3(x + sx, H - 0.5, front + 3.5), b = new THREE.Vector3(x + sx, H - 9, front - 4);
+      const d = b.clone().sub(a), beam = add(new THREE.CylinderGeometry(0.22, 0.22, d.length(), 8), dark);
+      beam.position.copy(a).addScaledVector(d, 0.5);
+      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+      for (let z = front - 4.5; z <= front + 2.5; z += 1.75) add(new THREE.CylinderGeometry(0.09, 0.09, 2.2, 6), metal, x + sx * 1.2, H + 1.1, z);
+      add(new THREE.BoxGeometry(0.14, 0.14, 7.2), metal, x + sx * 1.2, H + 2.15, front - 1);
+    }
+    const sign = heightLabel(cl.m + " m");
+    sign.position.set(x, H + 4.2, front - 4.6); scene.add(sign);
+    add(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal, x - 1.6, H + 1.7, front - 4.7);
+    add(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), metal, x + 1.6, H + 1.7, front - 4.7);
+    return { H, x, front, edge: front + 4.6, start: front - 3.2 };
+  });
+
+  // ---------- Scenery ----------
+  // Lighthouse islet
+  rock(9, 15, 16, -88, -6, 30, 4.1, { rough: 2, seg: 16, hseg: 6 });
+  {
+    const lx = -88, lz = 30, base = 9.5;
+    for (let i = 0; i < 6; i++) add(new THREE.CylinderGeometry(3.4 - i * 0.28, 3.6 - i * 0.28, 4, 20), std(i % 2 ? 0xe63946 : 0xffffff), lx, base + 2 + i * 4, lz);
+    add(new THREE.CylinderGeometry(2.4, 2.4, 3, 16), new THREE.MeshBasicMaterial({ color: 0xffe9a0 }), lx, base + 26.5, lz);
+    add(new THREE.ConeGeometry(3, 3, 16), std(0x2d2d33), lx, base + 29.5, lz);
+  }
+  // Distant islands
+  [[-420, -520, 90, 140, 70], [380, -620, 120, 170, 110], [700, 120, 70, 100, 50], [-760, 60, 60, 90, 45], [140, -900, 160, 220, 150]].forEach(([x, z, rt, rb, h], i) =>
+    rock(rt, rb, h, x, -8, z, 7 + i, { rough: 7, seg: 16, hseg: 6 }));
+  // Rocks near the base
+  [[-40, 6, 4], [34, 2, 5], [-28, 14, 2.5], [46, 18, 3]].forEach(([x, z, r], i) => rock(r * 0.6, r, r * 1.6, x, -2.5, z, 20 + i, { rough: 1, seg: 9, hseg: 3 }));
+
+  // Spectator boat
+  const boat = new THREE.Group(); scene.add(boat);
+  {
+    const hull = new THREE.Shape();
+    hull.moveTo(-2.6, 0); hull.lineTo(2.6, 0); hull.lineTo(3.2, 2.2); hull.lineTo(-3.2, 2.2); hull.closePath();
+    const hg = new THREE.ExtrudeGeometry(hull, { depth: 14, bevelEnabled: false }); hg.translate(0, -1.2, -7);
+    add(hg, std(0xffffff, { rough: 0.5 }), 0, 0, 0, boat);
+    add(new THREE.BoxGeometry(6.5, 0.4, 14.2), std(0x1d4e89), 0, 0.9, 0, boat);
+    add(new THREE.BoxGeometry(4.2, 2.4, 4), std(0xf2f2f2), 0, 2.2, -3, boat);
+    add(new THREE.BoxGeometry(4.3, 0.8, 4.1), std(0x9fd3f0, { rough: 0.2 }), 0, 2.6, -3, boat);
+    const shirts = [0xffd166, 0x06d6a0, 0xef476f, 0x118ab2, 0xf78c6b];
+    for (let i = 0; i < 5; i++) {
+      const px = -1.8 + (i % 3) * 1.8, pz = 1.5 + Math.floor(i / 3) * 2.2;
+      add(new THREE.CylinderGeometry(0.45, 0.4, 1.6, 10), std(shirts[i]), px, 1.9, pz, boat);
+      add(new THREE.SphereGeometry(0.4, 12, 8), std(0xe0ac69), px, 3.1, pz, boat);
+    }
+  }
+  boat.position.set(42, 0, 44); boat.rotation.y = -0.6;
+
+  // Buoys
+  const buoys = [[-14, 22], [14, 22], [-14, 46], [14, 46]].map(([x, z]) => {
+    const b = new THREE.Group(); scene.add(b);
+    add(new THREE.SphereGeometry(0.9, 14, 10), std(0xff5a4e, { rough: 0.4 }), 0, 0, 0, b);
+    add(new THREE.CylinderGeometry(0.92, 0.92, 0.35, 14), std(0xffffff), 0, 0.2, 0, b);
+    b.userData = { x, z }; return b;
+  });
+
+  // Seagulls
+  const gulls = [];
+  {
+    const wingGeo = new THREE.BufferGeometry();
+    wingGeo.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, -0.4, 0, 0, 0.5, 2.2, 0.2, 0.1], 3));
+    wingGeo.computeVertexNormals();
+    const wMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, side: THREE.DoubleSide });
+    for (let i = 0; i < 7; i++) {
+      const g = new THREE.Group(); scene.add(g);
+      add(new THREE.SphereGeometry(0.35, 8, 6), std(0xffffff), 0, 0, 0, g).scale.set(1, 0.8, 2.2);
+      const wl = new THREE.Mesh(wingGeo, wMat), wr = new THREE.Mesh(wingGeo, wMat);
+      wr.scale.x = -1; g.add(wl, wr);
+      gulls.push({ g, wl, wr, r: 70 + i * 14, h: 70 + (i % 3) * 18, sp: 0.12 + (i % 4) * 0.03, ph: i * 1.3 });
+    }
+  }
+
+  // =====================================================================
+  // The diver
+  // =====================================================================
+  function buildDiver() {
+    const root = new THREE.Group(); scene.add(root);
+    const skin = std(0xe0ac69, { rough: 0.6 }), suit = std(0xff5a4e, { rough: 0.55 }), cap = std(0xf4d58d, { rough: 0.4 }), dark = basic(0x111111);
+    const torso = add(new THREE.CylinderGeometry(0.82, 0.72, 1.9, 18), suit, 0, 0.45, 0, root); torso.scale.z = 0.7;
+    add(new THREE.SphereGeometry(0.78, 16, 10), suit, 0, -0.5, 0, root).scale.set(1, 0.5, 0.72);
+    for (const sx of [-0.82, 0.82]) add(new THREE.SphereGeometry(0.4, 12, 10), skin, sx, 1.3, 0, root);
+    add(new THREE.CylinderGeometry(0.28, 0.3, 0.4, 10), skin, 0, 1.55, 0, root);
+    add(new THREE.SphereGeometry(0.66, 20, 16), skin, 0, 2.05, 0, root);
+    add(new THREE.SphereGeometry(0.69, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), cap, 0, 2.1, -0.02, root).rotation.x = -0.15;
+    for (const ex of [-0.23, 0.23]) add(new THREE.SphereGeometry(0.08, 8, 6), dark, ex, 2.12, 0.6, root);
+    const arm = sx => {
+      const p = new THREE.Group(); p.position.set(sx, 1.3, 0); root.add(p);
+      add(new THREE.CylinderGeometry(0.26, 0.22, 1.75, 10), skin, 0, -0.875, 0, p);
+      add(new THREE.SphereGeometry(0.25, 10, 8), skin, 0, -1.8, 0, p);
+      return p;
+    };
+    const leg = sx => {
+      const p = new THREE.Group(); p.position.set(sx, -0.6, 0); root.add(p);
+      add(new THREE.CylinderGeometry(0.34, 0.3, 1.0, 12), skin, 0, -0.5, 0, p);
+      const knee = new THREE.Group(); knee.position.y = -1.0; p.add(knee);
+      add(new THREE.CylinderGeometry(0.29, 0.24, 1.0, 12), skin, 0, -0.5, 0, knee);
+      add(new THREE.SphereGeometry(0.28, 10, 8), skin, 0, -1.05, 0.12, knee).scale.set(1, 0.55, 1.5);
+      return { p, knee };
+    };
+    const aL = arm(-0.98), aR = arm(0.98), lL = leg(-0.42), lR = leg(0.42);
+    const shadow = add(new THREE.CircleGeometry(1.5, 20), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.25, depthWrite: false }));
+    shadow.rotation.x = -Math.PI / 2;
+    return { root, aL, aR, lL, lR, shadow, j: { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lLx: 0, lRx: 0, kLx: 0, kRx: 0 } };
+  }
+  const diver = buildDiver();
+
+  function setPose(target, dt) {
+    const j = diver.j, k = Math.min(1, dt * 14);
+    for (const key in target) j[key] += (target[key] - j[key]) * k;
+    diver.aL.rotation.set(j.aLx, 0, j.aLz); diver.aR.rotation.set(j.aRx, 0, j.aRz);
+    diver.lL.p.rotation.x = j.lLx; diver.lR.p.rotation.x = j.lRx;
+    diver.lL.knee.rotation.x = j.kLx; diver.lR.knee.rotation.x = j.kRx;
+  }
+  const POSE = {
+    stand: { aLx: 0, aLz: -0.12, aRx: 0, aRz: 0.12, lLx: 0, lRx: 0, kLx: 0, kRx: 0 },
+    straight: { aLx: 0, aLz: -0.05, aRx: 0, aRz: 0.05, lLx: 0, lRx: 0, kLx: 0, kRx: 0 },
+    headfirst: { aLx: Math.PI, aLz: 0.08, aRx: Math.PI, aRz: -0.08, lLx: 0, lRx: 0, kLx: 0, kRx: 0 },
+    tuck: { aLx: -1.0, aLz: 0.25, aRx: -1.0, aRz: -0.25, lLx: -2.1, lRx: -2.1, kLx: 2.25, kRx: 2.25 },
+    spread: { aLx: 0, aLz: -1.3, aRx: 0, aRz: 1.3, lLx: 0.2, lRx: -0.2, kLx: 0.2, kRx: 0.2 },
+  };
+
+  // =====================================================================
+  // Splash
+  // =====================================================================
+  const DROPS = 260;
+  const dropMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.22, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }), DROPS);
+  dropMesh.count = 0; scene.add(dropMesh);
+  const drops = [];
+  const ring = add(new THREE.RingGeometry(0.7, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  const foam = add(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0xe8fbff, transparent: true, opacity: 0, depthWrite: false }));
+  foam.rotation.x = -Math.PI / 2;
+  let splashT = 9, splashSize = 1;
+  function splash(x, z, size) {
+    splashT = 0; splashSize = size;
+    ring.position.set(x, 0.6, z); foam.position.set(x, 0.55, z);
+    drops.length = 0;
+    const n = Math.round(40 + size * 220);
+    for (let i = 0; i < Math.min(DROPS, n); i++) {
+      const a = Math.random() * Math.PI * 2, out = (2 + Math.random() * 6) * (0.5 + size), up = (6 + Math.random() * 22) * (0.35 + size * 0.9);
+      const column = Math.random() < 0.35;
+      drops.push({ p: new THREE.Vector3(x + Math.cos(a) * 0.6, 0.5, z + Math.sin(a) * 0.6),
+        v: new THREE.Vector3(Math.cos(a) * out * (column ? 0.25 : 1), up * (column ? 1.3 : 1), Math.sin(a) * out * (column ? 0.25 : 1)),
+        s: 0.5 + Math.random() * (0.6 + size), life: 0 });
+    }
+  }
+  const _m = new THREE.Matrix4(), _q0 = new THREE.Quaternion(), _sv = new THREE.Vector3();
+  function updateSplash(dt) {
+    splashT += dt;
+    let n = 0;
+    for (const d of drops) {
+      d.life += dt;
+      d.v.y -= G * 0.8 * dt; d.p.addScaledVector(d.v, dt);
+      if (d.p.y < 0) continue;
+      _sv.setScalar(d.s); _m.compose(d.p, _q0, _sv); dropMesh.setMatrixAt(n++, _m);
+    }
+    dropMesh.count = n; dropMesh.instanceMatrix.needsUpdate = true;
+    const k = Math.min(1, splashT / 2.2);
+    ring.scale.setScalar(1 + splashT * (6 + splashSize * 10)); ring.material.opacity = 0.75 * (1 - k);
+    foam.scale.setScalar(2 + splashSize * 5 + splashT * 2.5); foam.material.opacity = 0.6 * (1 - Math.min(1, splashT / 4));
+  }
+
+  // =====================================================================
+  // Sound
+  // =====================================================================
+  let actx = null, noiseBuf = null, wind = null;
+  function initAudio() {
+    if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      noiseBuf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      const f = actx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 500; f.Q.value = 0.6;
+      const g = actx.createGain(); g.gain.value = 0;
+      src.connect(f); f.connect(g); g.connect(actx.destination); src.start();
+      wind = { f, g };
+    } catch (e) { actx = null; }
+  }
+  function noise(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const t = actx.currentTime + delay, s = actx.createBufferSource(); s.buffer = noiseBuf;
+    const f = actx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = actx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f); f.connect(g); g.connect(actx.destination); s.start(t, Math.random()); s.stop(t + dur + 0.05);
+  }
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    if (!actx || !save.sound) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function splashSound(size) {
+    noise("lowpass", 1400 + size * 1500, 180, 0.45 + size * 0.7, 0.35 + size * 0.45);
+    tone("sine", 140, 40, 0.3 + size * 0.3, 0.25 + size * 0.3);
+    if (size > 0.7) noise("highpass", 2500, 900, 0.12, 0.5);
+  }
+  function cheer(level) {
+    for (let i = 0; i < 6 + level * 8; i++) noise("bandpass", 900 + Math.random() * 1600, 700 + Math.random() * 900, 0.6 + Math.random() * 0.8, 0.05 + level * 0.06, Math.random() * 0.7);
+  }
+
+  // =====================================================================
+  // Game state
+  // =====================================================================
+  let state = "menu";                 // menu | ready | run | air | under | score
+  let cliffIdx = 0, now = 0, stateT = 0;
+  const pos = new THREE.Vector3(), vel = new THREE.Vector3(), q = new THREE.Quaternion();
+  let Lp = 0, Lt = 0, flipAngle = 0, twistAngle = 0, everTucked = false, pitchRate = 0, twistRate = 0, entry = null;
+  const keys = {}, pad = { fwd: false, back: false, twL: false, twR: false, tuck: false };
+  const fireCodes = new Set();
+  const tucked = () => pad.tuck || fireCodes.size > 0;
+
+  const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), _qa = new THREE.Quaternion(), _up = new THREE.Vector3(), _xw = new THREE.Vector3(), _cr = new THREE.Vector3();
+
+  function show(ids) {
+    for (const id of ["menu", "hud", "score"]) $(id).classList.toggle("hidden", !ids.includes(id));
+  }
+  function setState(s) {
+    state = s; stateT = 0;
+    const air = s === "air";
+    $("diveBtn").classList.toggle("hidden", s !== "ready");
+    $("pads").classList.toggle("hidden", !(isTouch && (s === "air" || s === "run")));
+    $("spin").classList.toggle("hidden", !(s === "air" || s === "under"));
+    $("alt").classList.toggle("hidden", !air);
+    $("menuBtn").classList.toggle("hidden", !(s === "ready"));
+    if (s === "ready") hint(isTouch ? "Tap Dive to run off the edge" : "Press Space to run off the edge");
+    else if (s !== "air") hint("");
+  }
+  function hint(text) { $("hint").textContent = text; $("hint").classList.toggle("hidden", !text); }
+  let calloutTimer;
+  function callout(text, secs = 1.2) {
+    const c = $("callout"); c.textContent = text; c.style.opacity = 1;
+    clearTimeout(calloutTimer); calloutTimer = setTimeout(() => c.style.opacity = 0, secs * 1000);
+  }
+
+  function goToCliff(i) {
+    cliffIdx = i; save.cliff = i; persist();
+    const p = platforms[i];
+    pos.set(p.x, p.H + COM, p.start); vel.set(0, 0, 0); q.identity();
+    Lp = Lt = flipAngle = twistAngle = 0; everTucked = false; entry = null;
+    diver.root.visible = true;
+    for (const k in diver.j) diver.j[k] = POSE.stand[k];
+    $("whereName").textContent = CLIFFS[i].name;
+    $("whereSub").textContent = CLIFFS[i].m + " m · best " + save.best[i].toFixed(1);
+    show(["hud"]); setState("ready");
+    camT = 0;
+    try { window.focus(); canvas.focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function startRun() {
+    if (state !== "ready") return;
+    initAudio();
+    setState("run");
+  }
+
+  function takeOff() {
+    vel.set(0, 9.5, 10.5);
+    if (keys.w || keys.arrowup || pad.fwd) Lp = 3;
+    if (keys.s || keys.arrowdown || pad.back) Lp = -3;
+    noise("highpass", 3000, 800, 0.25, 0.25);
+    setState("air");
+  }
+
+  // =====================================================================
+  // Scoring
+  // =====================================================================
+  const half = n => n % 2 ? (n > 1 ? Math.floor(n / 2) + "½" : "½") : String(n / 2);
+  function diveName(fh, th, dir, entryType) {
+    const parts = [];
+    if (fh) parts.push((dir > 0 ? "Forward " : "Back ") + half(fh) + (fh > 2 ? " somersaults" : " somersault"));
+    if (th) parts.push(half(th) + (th > 2 ? " twists" : " twist"));
+    if (!parts.length) parts.push("Straight jump");
+    return parts.join(", ") + ", " + entryType;
+  }
+  function judge() {
+    const e = entry;
+    const fh = Math.round(Math.abs(flipAngle) / Math.PI), th = Math.round(Math.abs(twistAngle) / Math.PI);
+    let dd = 1 + 0.4 * fh + 0.15 * th + 0.2 * cliffIdx + (fh > 0 && !everTucked ? 0.3 : 0);
+    dd = Math.min(5, Math.round(dd * 10) / 10);
+    let base = Math.max(0, Math.min(10, 10 - e.err / 5));
+    const notes = [];
+    if (e.tucked) { base -= 3; notes.push("still tucked"); }
+    if (Math.abs(e.rate) > 2.2) { base -= 1.5; notes.push("still spinning"); }
+    if (e.err > 45) { base = Math.min(base, 2); }
+    base = Math.max(0, base);
+    const js = [0, 1, 2].map(() => Math.max(0, Math.min(10, Math.round((base + (Math.random() - 0.5)) * 2) / 2)));
+    const total = Math.round(js.reduce((a, b) => a + b, 0) * dd * 10) / 10;
+    let verdict;
+    if (e.err > 45) verdict = "Ouch. Straighten out (let go of tuck) and stop spinning before the water.";
+    else if (e.err < 7 && !notes.length) verdict = "Rip entry. Barely a ripple.";
+    else if (e.err < 15 && !notes.length) verdict = "Clean entry.";
+    else verdict = "Entry was " + Math.round(e.err) + "° off" + (notes.length ? ", " + notes.join(" and ") : "") + ".";
+    return { fh, th, dd, js, total, verdict, name: diveName(fh, th, Math.sign(flipAngle) || 1, e.type) };
+  }
+
+  function enterWater() {
+    _up.set(0, 1, 0).applyQuaternion(q);
+    const errFeet = Math.acos(Math.max(-1, Math.min(1, _up.y))) * 180 / Math.PI;
+    const errHead = 180 - errFeet;
+    entry = { err: Math.min(errFeet, errHead), type: errFeet <= errHead ? "feet first" : "head first",
+      tucked: tucked(), rate: pitchRate, speed: vel.length(), x: pos.x, z: pos.z };
+    const size = Math.min(1.4, entry.err / 40 + (entry.tucked ? 0.6 : 0) + 0.12);
+    splash(pos.x, pos.z, size);
+    splashSound(size);
+    if (entry.err < 7 && !entry.tucked && Math.abs(pitchRate) < 2.2) callout("Rip!");
+    else if (entry.err > 45) callout("Smack!");
+    $("fade").style.opacity = 1; setTimeout(() => $("fade").style.opacity = 0, 450);
+    if (wind) wind.g.gain.setTargetAtTime(0, actx.currentTime, 0.05);
+    setState("under");
+  }
+
+  function showScore() {
+    const r = judge();
+    save.dives++;
+    const prevBest = save.best[cliffIdx];
+    const newBest = r.total > prevBest;
+    if (newBest) save.best[cliffIdx] = r.total;
+    let unlockedNow = false;
+    if (r.total >= UNLOCK && cliffIdx === save.unlocked - 1 && save.unlocked < CLIFFS.length) { save.unlocked++; unlockedNow = true; }
+    persist();
+    $("dName").textContent = r.name[0].toUpperCase() + r.name.slice(1);
+    $("dSub").textContent = CLIFFS[cliffIdx].name + " · " + CLIFFS[cliffIdx].m + " m · " + Math.round(entry.speed / U * 3.6) + " km/h at the water";
+    $("ddNum").textContent = r.dd.toFixed(1);
+    r.js.forEach((v, i) => $("j" + i).textContent = v.toFixed(1));
+    $("jt").textContent = r.total.toFixed(1);
+    let v = r.verdict;
+    if (newBest) v += " New best on this cliff!";
+    if (unlockedNow) v += " " + CLIFFS[cliffIdx + 1].name + " unlocked!";
+    else if (cliffIdx === save.unlocked - 1 && save.unlocked < CLIFFS.length) v += " Score " + UNLOCK + "+ here to unlock the next cliff.";
+    $("verdict").textContent = v;
+    const canNext = cliffIdx + 1 < save.unlocked;
+    $("nextBtn").classList.toggle("hidden", !canNext);
+    const cards = [...document.querySelectorAll(".judge")];
+    cards.forEach(c => c.classList.remove("in"));
+    cards.forEach((c, i) => setTimeout(() => { c.classList.add("in"); tone("sine", i === 3 ? 660 : 880, i === 3 ? 990 : 880, 0.18, 0.12); }, 250 + i * 420));
+    setTimeout(() => cheer(r.total >= 60 ? 2 : r.total >= 30 ? 1 : 0), 1700);
+    show(["hud", "score"]); setState("score");
+    $("againBtn").focus({ preventScroll: true });
+  }
+
+  // =====================================================================
+  // Menu
+  // =====================================================================
+  function renderMenu() {
+    const ladder = $("ladder"); ladder.innerHTML = "";
+    for (let i = CLIFFS.length - 1; i >= 0; i--) {
+      const c = CLIFFS[i], open = i < save.unlocked;
+      const b = document.createElement("button");
+      b.className = "rung"; b.disabled = !open;
+      b.setAttribute("aria-pressed", save.cliff === i);
+      b.innerHTML = `<span class="h num">${c.m}<small> m</small></span><span class="n">${c.name}</span>` +
+        `<span class="b num">${open ? (save.best[i] ? "Best " + save.best[i].toFixed(1) : "New") : "Score " + UNLOCK + " on " + CLIFFS[i - 1].name}</span>`;
+      b.addEventListener("click", () => { save.cliff = i; persist(); renderMenu(); });
+      ladder.append(b);
+    }
+    $("soundBtn").textContent = "Sound: " + (save.sound ? "on" : "off");
+  }
+  $("help").innerHTML = isTouch
+    ? `<p><b>Swipe up</b> to flip forward, <b>swipe down</b> to flip backward. Bigger, faster swipes spin harder.</p>
+       <p><b>Swipe left or right</b> to twist like a corkscrew.</p>
+       <p><b>Hold TUCK</b> to curl up and spin much faster. Let go near upright and you'll straighten out for a clean entry.</p>`
+    : `<p><b>Space</b> run off the edge. <b>W / S</b> or <b>↑ / ↓</b> flip forward or back.</p><p><b>A / D</b> or <b>← / →</b> twist. <b>Shift</b> (either one) tuck to spin faster.</p>
+       <p>Land straight up and down, feet or head first, and let go of Shift before the water.</p><p><b>R</b> dive again. <b>Esc</b> back to the cliffs. <b>F</b> full screen.</p>`;
+  $("helpBtn").addEventListener("click", () => $("help").classList.toggle("hidden"));
+  $("soundBtn").addEventListener("click", () => { save.sound = !save.sound; persist(); renderMenu(); });
+  $("goBtn").addEventListener("click", () => { initAudio(); goToCliff(save.cliff); });
+  $("menuBtn").addEventListener("click", toMenu);
+  $("cliffsBtn").addEventListener("click", toMenu);
+  $("againBtn").addEventListener("click", () => goToCliff(cliffIdx));
+  $("nextBtn").addEventListener("click", () => goToCliff(Math.min(cliffIdx + 1, save.unlocked - 1)));
+  $("diveBtn").addEventListener("click", startRun);
+  // ---------- Full screen ----------
+  const root = document.documentElement;
+  const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  let toastTimer;
+  function toast(text, secs = 5) {
+    const t = $("toast"); t.textContent = text; t.style.opacity = 1;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.opacity = 0, secs * 1000);
+  }
+  function fsLabels() {
+    const on = isFull();
+    $("fsMenuBtn").textContent = on ? "⛶ Exit full screen" : "⛶ Full screen";
+    $("fsHudBtn").setAttribute("aria-label", on ? "Exit full screen" : "Full screen");
+    $("fsHudBtn").textContent = on ? "🗗" : "⛶";
+  }
+  async function toggleFull() {
+    try {
+      if (isFull()) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        await exit.call(document);
+      } else {
+        const blocked = document.fullscreenEnabled === false && !document.webkitFullscreenEnabled;
+        if (root.requestFullscreen && !blocked) await root.requestFullscreen({ navigationUI: "hide" });
+        else if (root.webkitRequestFullscreen && !blocked) root.webkitRequestFullscreen();
+        else throw new Error("not allowed");
+        setTimeout(() => { if (!isFull()) toast("This window didn't allow full screen. Try opening the game in its own browser tab."); }, 600);
+      }
+    } catch (e) {
+      toast("This window didn't allow full screen. Try opening the game in its own browser tab.");
+    }
+    try { canvas.focus({ preventScroll: true }); } catch (e) {}
+  }
+  $("fsMenuBtn").addEventListener("click", toggleFull);
+  $("fsHudBtn").addEventListener("click", toggleFull);
+  document.addEventListener("fullscreenchange", () => { fsLabels(); resize(); });
+  document.addEventListener("webkitfullscreenchange", () => { fsLabels(); resize(); });
+
+  function toMenu() { state = "menu"; diver.root.visible = true; renderMenu(); show(["menu"]); setState("menu"); }
+
+  // =====================================================================
+  // Input: keyboard and touch work together
+  // =====================================================================
+  canvas.tabIndex = 0;
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight" || k === "shift") { fireCodes.add(e.code || "Shift"); if (state === "air") everTucked = true; return; }
+    if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k) && state !== "menu") e.preventDefault();
+    keys[k] = true;
+    if (e.repeat) return;
+    if (k === "f") { toggleFull(); return; }
+    if (state === "ready" && (k === " " || k === "enter")) startRun();
+    else if (state === "score" && (k === " " || k === "enter" || k === "r")) { e.preventDefault(); goToCliff(cliffIdx); }
+    else if (k === "r" && (state === "ready" || state === "air" || state === "under")) goToCliff(cliffIdx);
+    else if (k === "escape" && state !== "menu") toMenu();
+  });
+  addEventListener("keyup", e => {
+    const k = e.key.toLowerCase();
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight" || k === "shift") { fireCodes.delete(e.code || "Shift"); return; }
+    keys[k] = false;
+  });
+  addEventListener("blur", () => { for (const k in keys) keys[k] = false; fireCodes.clear(); for (const k in pad) pad[k] = false; });
+  const holdPad = (id, key) => {
+    const el = $(id);
+    const on = e => { e.preventDefault(); pad[key] = true; el.classList.add("on"); if (key === "tuck" && state === "air") everTucked = true; };
+    const off = () => { pad[key] = false; el.classList.remove("on"); };
+    el.addEventListener("pointerdown", on);
+    for (const ev of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(ev, off);
+  };
+  holdPad("pTuck", "tuck");
+
+  // Swipe anywhere on the screen: up/down to flip, left/right to twist. Faster, longer swipes spin harder.
+  let swipeId = null, sx = 0, sy = 0, lastSwipeFlip = -9;
+  const SWIPE_FLIP = 0.022, SWIPE_TWIST = 0.035;
+  canvas.addEventListener("pointerdown", e => {
+    try { canvas.focus({ preventScroll: true }); } catch (err) {}
+    if (swipeId !== null) return;
+    swipeId = e.pointerId; sx = e.clientX; sy = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    const tr = $("trail"); tr.style.left = sx + "px"; tr.style.top = sy + "px"; tr.style.opacity = state === "air" ? 1 : 0;
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (e.pointerId !== swipeId) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    sx = e.clientX; sy = e.clientY;
+    const tr = $("trail"); tr.style.left = sx + "px"; tr.style.top = sy + "px";
+    if (state !== "air") return;
+    if (Math.abs(dy) > 0.5) { Lp = Math.max(-8, Math.min(8, Lp - dy * SWIPE_FLIP)); lastSwipeFlip = now; }
+    if (Math.abs(dx) > 0.5) Lt = Math.max(-12, Math.min(12, Lt - dx * SWIPE_TWIST));
+  });
+  const endSwipe = e => { if (e.pointerId === swipeId) { swipeId = null; $("trail").style.opacity = 0; } };
+  canvas.addEventListener("pointerup", endSwipe);
+  canvas.addEventListener("pointercancel", endSwipe);
+
+  // =====================================================================
+  // Main loop
+  // =====================================================================
+  let last = performance.now(), camT = 0;
+  const camPos = new THREE.Vector3(140, 70, 160), camLook = new THREE.Vector3(0, 40, 0), _tp = new THREE.Vector3(), _tl = new THREE.Vector3();
+
+  function updateDiver(dt) {
+    const p = platforms[cliffIdx];
+    if (state === "ready") {
+      setPose(POSE.stand, dt);
+      diver.root.position.copy(pos); diver.root.quaternion.identity();
+    } else if (state === "run") {
+      const sp = Math.min(10.5, 3 + stateT * 9);
+      pos.z += sp * dt;
+      const sw = Math.sin(stateT * 14) * 0.9;
+      setPose({ aLx: sw, aLz: -0.1, aRx: -sw, aRz: 0.1, lLx: -sw, lRx: sw, kLx: 0.5 + Math.max(0, sw) * 0.6, kRx: 0.5 + Math.max(0, -sw) * 0.6 }, dt);
+      diver.root.position.copy(pos); diver.root.position.y += Math.abs(Math.sin(stateT * 14)) * 0.18;
+      if (pos.z >= p.edge) takeOff();
+    } else if (state === "air") {
+      vel.y -= G * dt;
+      pos.addScaledVector(vel, dt);
+      const tk = tucked();
+      if (tk) everTucked = true;
+      const flipIn = (keys.w || keys.arrowup || pad.fwd ? 1 : 0) - (keys.s || keys.arrowdown || pad.back ? 1 : 0);
+      const twistIn = (keys.a || keys.arrowleft || pad.twL ? 1 : 0) - (keys.d || keys.arrowright || pad.twR ? 1 : 0);
+      Lp = Math.max(-8, Math.min(8, Lp + flipIn * 14 * dt));
+      if (!flipIn && now - lastSwipeFlip > 0.3) {
+        // Opening up near vertical: the diver lines up for a clean entry by themselves
+        _up.set(0, 1, 0).applyQuaternion(q); _xw.set(1, 0, 0).applyQuaternion(q);
+        const target = _up.y >= 0 ? 1 : -1;
+        _cr.set(0, target, 0); _cr.crossVectors(_up, _cr);
+        const err = Math.atan2(_cr.dot(_xw), _up.y * target);
+        if (!tk && stateT > 0.3 && Math.abs(err) < 1.05) { Lp += err * 9 * dt; Lp *= 1 - 3 * dt; }
+        else Lp *= 1 - 0.25 * dt;
+      }
+      Lt = Math.max(-12, Math.min(12, Lt + twistIn * 22 * dt)); if (!twistIn) Lt *= 1 - 0.6 * dt;
+      pitchRate = Lp / (tk ? 1 : 2.6);
+      twistRate = Lt / (tk ? 2.5 : 1);
+      q.multiply(_qa.setFromAxisAngle(AX, pitchRate * dt)).multiply(_qa.setFromAxisAngle(AY, twistRate * dt)).normalize();
+      flipAngle += pitchRate * dt; twistAngle += twistRate * dt;
+      _up.set(0, 1, 0).applyQuaternion(q);
+      setPose(tk ? POSE.tuck : _up.y < -0.25 ? POSE.headfirst : stateT < 0.25 ? POSE.spread : POSE.straight, dt);
+      diver.root.position.copy(pos); diver.root.quaternion.copy(q);
+      // HUD while falling
+      const fh = Math.floor(Math.abs(flipAngle) / Math.PI + 0.15), th = Math.floor(Math.abs(twistAngle) / Math.PI + 0.15);
+      $("spinNum").textContent = fh || th ? (fh ? half(fh) + " flip" + (fh > 2 ? "s" : "") : "") + (fh && th ? " · " : "") + (th ? half(th) + " twist" + (th > 2 ? "s" : "") : "") : "Free fall";
+      $("spinSub").textContent = Math.round(vel.length() / U * 3.6) + " km/h";
+      const frac = Math.max(0, (pos.y - COM) / p.H);
+      $("altFill").style.height = (frac * 100) + "%";
+      $("altLabel").style.bottom = (frac * 100) + "%";
+      $("altLabel").textContent = Math.max(0, (pos.y - COM) / U).toFixed(0) + " m";
+      const tLeft = (vel.y + Math.sqrt(Math.max(0, vel.y * vel.y + 2 * G * pos.y))) / G;
+      if (tLeft < 0.55 && (tk || Math.abs(pitchRate) > 2.2)) hint(tk ? (isTouch ? "Let go of TUCK!" : "Let go of Shift!") : "Stop spinning!");
+      else if (tLeft < 0.55) hint("");
+      else if (stateT < 1.4) hint(isTouch ? "Swipe ↑ ↓ to flip, ← → to twist, hold TUCK to spin faster" : "W/S flip · A/D twist · Shift tuck (or swipe with the mouse)");
+      else hint("");
+      if (wind) { wind.g.gain.setTargetAtTime(save.sound ? Math.min(0.22, vel.length() / 320) : 0, actx.currentTime, 0.1); wind.f.frequency.setTargetAtTime(300 + vel.length() * 10, actx.currentTime, 0.1); }
+      if (pos.y <= 0.4) enterWater();
+    } else if (state === "under") {
+      vel.multiplyScalar(Math.pow(0.02, dt)); pos.addScaledVector(vel, dt);
+      diver.root.position.copy(pos); diver.root.quaternion.copy(q);
+      if (stateT > 0.35) diver.root.visible = false;
+      if (stateT > 1.6) showScore();
+    }
+    const showShadow = diver.root.visible && (state === "ready" || state === "run");
+    diver.shadow.visible = showShadow;
+    if (showShadow) diver.shadow.position.set(pos.x, p.H + 0.03, pos.z);
+  }
+
+  function updateCamera(dt) {
+    camT += dt;
+    const p = platforms[cliffIdx];
+    if (state === "menu") {
+      const a = performance.now() / 1000 * 0.05;
+      _tp.set(Math.sin(a) * 190 + 30, 75, Math.cos(a) * 150 + 90); _tl.set(0, 42, -10);
+    } else if (state === "ready" || state === "run") {
+      _tp.set(p.x + 9, p.H + 7.5, p.start - 10); _tl.set(p.x - 1, p.H - 14, p.edge + 22);
+    } else if (state === "air") {
+      _tp.set(pos.x + 26, Math.max(4, pos.y + 4), pos.z - 6); _tl.set(pos.x, pos.y - 3, pos.z + 5);
+    } else {
+      _tp.set(entry.x + 24, 6, entry.z - 10); _tl.set(entry.x, 3, entry.z);
+    }
+    const k = state === "menu" ? 1 : Math.min(1, dt * (state === "air" ? 5 : camT < 0.05 ? 60 : 3));
+    camPos.lerp(_tp, k); camLook.lerp(_tl, k);
+    camera.position.copy(camPos); camera.lookAt(camLook);
+  }
+
+  function frame(t) {
+    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    now += dt; stateT += dt;
+    waterU.uTime.value = now;
+    updateDiver(dt);
+    updateCamera(dt);
+    updateSplash(dt);
+    // Scenery motion
+    boat.position.y = waveH(boat.position.x, boat.position.z, now) + 0.1;
+    boat.rotation.z = Math.sin(now * 0.9) * 0.04; boat.rotation.x = Math.sin(now * 0.7) * 0.03;
+    for (const b of buoys) b.position.set(b.userData.x, waveH(b.userData.x, b.userData.z, now) + 0.3, b.userData.z);
+    for (const g of gulls) {
+      const a = now * g.sp + g.ph;
+      g.g.position.set(Math.cos(a) * g.r, g.h + Math.sin(a * 2) * 4, Math.sin(a) * g.r - 10);
+      g.g.rotation.y = -a; g.g.rotation.z = 0.25;
+      const flap = Math.sin(now * 7 + g.ph) * 0.5;
+      g.wl.rotation.z = flap; g.wr.rotation.z = -flap;
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  // =====================================================================
+  // Boot
+  // =====================================================================
+  renderMenu();
+  restore();
+  goToCliff(save.cliff); toMenu();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
