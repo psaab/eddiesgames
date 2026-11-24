@@ -74,7 +74,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Ski Northstar version 1.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Ski Northstar v1.0</div>
+<div id="__ver" aria-label="Ski Northstar version 2.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Ski Northstar v2.0</div>
 <canvas id="c3" tabindex="0"></canvas>
 <div id="board" class="hidden"></div>
 <div id="touch" class="hidden">
@@ -171,8 +171,17 @@
   }
   // ---------- keys ----------
   const keys = {};
+  // read keys by their physical position (works with iPad keyboards, which name arrow keys "UIKeyInputLeftArrow")
+  const CODE = { ArrowLeft: "arrowleft", ArrowRight: "arrowright", ArrowUp: "arrowup", ArrowDown: "arrowdown", Space: " ", Enter: "enter", NumpadEnter: "enter", Escape: "escape", ShiftLeft: "shift", ShiftRight: "shift" };
+  const ALIAS = { uikeyinputleftarrow: "arrowleft", uikeyinputrightarrow: "arrowright", uikeyinputuparrow: "arrowup", uikeyinputdownarrow: "arrowdown", uikeyinputescape: "escape", left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", spacebar: " ", esc: "escape" };
+  function keyName(e) {
+    if (e.code && CODE[e.code]) return CODE[e.code];
+    if (e.code && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+    const k = (e.key || "").toLowerCase(); return ALIAS[k] || k;
+  }
   addEventListener("keydown", e => {
-    const k = e.key.toLowerCase();
+    const k = keyName(e);
+    if (state === "play" && (k === " " || k === "enter") && document.activeElement && document.activeElement.tagName === "BUTTON") { e.preventDefault(); document.activeElement.blur(); canvas.focus(); }
     if (k.startsWith("arrow") || k === " ") e.preventDefault();
     keys[k] = true;
     if (e.repeat) return;
@@ -181,7 +190,9 @@
     else if ((k === "enter") && (state === "menu" || state === "over")) { initAudio(); startGame(); }
     if (GAME.onKey && state === "play") GAME.onKey(k);
   });
-  addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+  addEventListener("keyup", e => { const k = keyName(e); keys[k] = false; if (state === "play" && (k === " " || k === "enter")) e.preventDefault(); });
+  // after tapping an in-game button (MAP, RIDE, ...), hand the keyboard back to the game
+  document.addEventListener("click", e => { if (state === "play" && e.target.closest && e.target.closest("button") && !e.target.closest(".screen")) setTimeout(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); canvas.focus(); }, 0); });
   addEventListener("blur", () => { for (const k in keys) keys[k] = false; if (state === "play") pauseGame(); });
   // ---------- 3D setup ----------
   const canvas = $("c3");
@@ -479,7 +490,8 @@
   function liftDist(x, z) { let best = Infinity; for (const l of L) best = Math.min(best, segDist(x, z, [l.x0, l.z0], [l.x1, l.z1])[0]); return best; }
 
   // ---------- skier state ----------
-  const sk = { x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, h: 0, air: false, lean: 0, tuck: 0, ride: null };
+  const sk = { x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, h: 0, air: false, edge: 0, skid: 0, fallT: 0, airT: 0, spin: 0, spinV: 0, grabbed: false, brakeSide: 0, skate: 0, ride: null };
+  let tricks = 0, bestAir = 0;
   const inp = { left: false, right: false, tuck: false, brake: false, jump: false };
   let t = 0, runNow = null, runTrack = null, topSpeed = 0, distance = 0, vertical = 0, lastY = 0, lastRunCheck = 0, nearLift = null;
   const skied = new Set();
@@ -530,7 +542,7 @@
       const x = Math.random() * (NX - 1) * CELL, z = Math.random() * (NZ - 1) * CELL;
       let ok = true, glade = false;
       for (const r of R) { for (let k2 = 1; k2 < r.p.length; k2++) { const d = segDist(x, z, r.p[k2 - 1], r.p[k2])[0]; if (d < r.width * 0.62) { if (r.diff === "gl" && Math.random() < 0.25) glade = true; else { ok = false; break; } } } if (!ok) break; }
-      if (!ok || liftDist(x, z) < 9) continue;
+      if (!ok || liftDist(x, z) < 9 || KICK.some(k => Math.hypot(k.x - x, k.z - z) < 14)) continue;
       if (LODGES.some(([, [lx, ly], s]) => Math.hypot(WX(lx) - x, WZ(ly) - z) < 40 * s)) continue;
       trees.push([x, z, rand(0.8, 1.5) * (glade ? 0.9 : 1)]);
     }
@@ -541,6 +553,24 @@
     scene.add(ti); scene.add(ci);
     // tree grid for "deep in the trees" slowdown
     V.treeGrid = new Map(); for (const [x, z] of trees) { const key = ((x / 20) | 0) + "," + ((z / 20) | 0); V.treeGrid.set(key, (V.treeGrid.get(key) || 0) + 1); }
+    V.treeCells = new Map(); for (const tr of trees) { const key = ((tr[0] / 10) | 0) + "," + ((tr[1] / 10) | 0); if (!V.treeCells.has(key)) V.treeCells.set(key, []); V.treeCells.get(key).push(tr); }
+    // terrain-park kickers
+    const kickMat = lam(0xf4f7fb);
+    for (const k of KICK) {
+      const shp = new T3.Shape(); shp.moveTo(0, 0); for (let i = 1; i <= 8; i++) { const u = i / 8 * k.len; shp.lineTo(u, k.hgt * Math.pow(u / k.len, 1.6)); } shp.lineTo(k.len, -0.6); shp.lineTo(0, -0.6); shp.lineTo(0, 0);
+      const geo = new T3.ExtrudeGeometry(shp, { depth: k.wid, bevelEnabled: false }); geo.translate(0, 0, -k.wid / 2);
+      const m = mesh(geo, kickMat, true, true); m.position.set(k.x, height(k.x, k.z), k.z); m.rotation.y = Math.atan2(k.dx, k.dz) - Math.PI / 2;
+      // tilt with the slope so the ramp sits on the snow
+      const g1 = height(k.x, k.z), g2 = height(k.x + k.dx * k.len, k.z + k.dz * k.len); m.rotateZ(Math.atan2(g2 - g1, k.len)); scene.add(m);
+      const lip = mesh(new T3.BoxGeometry(0.25, 0.12, k.wid), lam(0xff8a1f)); lip.position.set(k.len, k.hgt, 0); m.add(lip);
+    }
+    // ski tracks in the snow and snow spray
+    const TK = 3000; V.trackPos = new Float32Array(TK * 18); V.trackN = 0; V.trackMax = TK;
+    V.trackGeo = new T3.BufferGeometry(); V.trackGeo.setAttribute("position", new T3.BufferAttribute(V.trackPos, 3)); V.trackGeo.setDrawRange(0, 0);
+    scene.add(new T3.Mesh(V.trackGeo, new T3.MeshBasicMaterial({ color: lin(0x8fa3bd), transparent: true, opacity: 0.45, depthWrite: false, side: T3.DoubleSide })));
+    V.spray = []; const sprayGeo = new T3.SphereGeometry(0.14, 6, 4);
+    for (let i = 0; i < 60; i++) { const m = mesh(sprayGeo, new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })); m.visible = false; scene.add(m); V.spray.push({ m, life: 9, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }); }
+    V.sprayI = 0; V.lastTrack = null;
     // lifts: towers, cables, terminals and moving chairs / gondola cabins
     V.lifts = L.map(l => {
       const grp = new T3.Group(); scene.add(grp);
@@ -607,37 +637,102 @@
   }
 
   // ---------- skiing physics ----------
-  function groundSlope(x, z) { const e = 2; return [(height(x + e, z) - height(x - e, z)) / (2 * e), (height(x, z + e) - height(x, z - e)) / (2 * e)]; }
+  // Carving: the edge angle sets a turn radius (ski sidecut), so turns follow arcs and keep speed.
+  // Steer harder than the edges can hold and the skis skid, scrubbing speed. BRAKE = hockey stop.
+  // Gravity along the slope, snow friction, air drag (tuck = less), real airtime off kickers and rolls.
+  const ground = (x, z) => height(x, z) + kickAt(x, z);
+  function groundSlope(x, z) { const e = 1.5; return [(ground(x + e, z) - ground(x - e, z)) / (2 * e), (ground(x, z + e) - ground(x, z - e)) / (2 * e)]; }
   function inTrees(x, z) { const k = ((x / 20) | 0) + "," + ((z / 20) | 0); return (V.treeGrid && V.treeGrid.get(k)) || 0; }
-  function stepSki(dt) {
-    const steer = (inp.left ? 1 : 0) - (inp.right ? 1 : 0), spd = Math.hypot(sk.vx, sk.vz);
-    sk.h += steer * (2.1 / (1 + spd / 22)) * dt;
-    sk.lean += (steer * Math.min(1, spd / 8) - sk.lean) * Math.min(1, dt * 6);
-    const fx = Math.sin(sk.h), fz = Math.cos(sk.h);
-    if (!sk.air) {
-      const [gx, gz] = groundSlope(sk.x, sk.z), n = Math.hypot(1, gx, gz);
-      sk.vx += -9.81 * gx / (n * n) * dt; sk.vz += -9.81 * gz / (n * n) * dt;           // gravity pulls you downhill
-      // edges grip: sideways speed bleeds off, so you go where your skis point (braking = skid to a stop)
-      let fwd = sk.vx * fx + sk.vz * fz, lat = sk.vx * fz - sk.vz * fx;
-      lat *= Math.exp(-(inp.brake ? 3 : 7) * dt);
-      const sp2 = Math.hypot(fwd, lat);
-      const trees = inTrees(sk.x, sk.z), onRun = runNow && runNow.d < runNow.r.width * 0.55;
-      const mu = (onRun ? 0.032 : 0.08) + (inp.brake ? 0.55 : 0) + (!onRun && trees > 2 ? 0.25 : 0);
-      const drag = (inp.tuck ? 0.0018 : 0.0042) * sp2 * sp2;
-      const dec = (mu * 9.81 + drag) * dt;
-      const k = sp2 > 0.01 ? Math.max(0, sp2 - dec) / sp2 : 0; fwd *= k; lat *= k;
-      if (inp.tuck && sp2 < 7) fwd += 2.6 * dt;                                       // skate / push on the flats
-      if (inp.tuck && fwd < 1.4) fwd = 1.4;                                            // or walk (herringbone) if you're stuck
-      if (fwd < 0 && !inp.tuck) fwd *= Math.exp(-3 * dt);                               // don't ski backwards for long
-      sk.vx = fx * fwd + fz * lat; sk.vz = fz * fwd - fx * lat;
-      if (inp.jump && !sk.jumped) { sk.air = true; sk.vy = 4.6; sk.jumped = true; tone("sine", 300, 500, 0.08, 0.05); }
-      if (!inp.jump) sk.jumped = false;
-    } else { sk.vy -= 9.81 * dt; sk.vx *= 1 - 0.0015 * dt; sk.vz *= 1 - 0.0015 * dt; }
-    sk.x = clamp(sk.x + sk.vx * dt, 5, (NX - 1) * CELL - 5); sk.z = clamp(sk.z + sk.vz * dt, 5, (NZ - 1) * CELL - 5);
-    const ground = height(sk.x, sk.z);
-    if (sk.air) { sk.y += sk.vy * dt; if (sk.y <= ground) { sk.y = ground; sk.air = false; noise("lowpass", 700, 200, 0.1, 0.15); } }
-    else sk.y = ground;
+  const KICK = [];
+  function buildKickers() {
+    for (const r of R) { if (r.diff !== "p") continue;
+      for (let i = 1; i < r.p.length; i++) { const a2 = r.p[i - 1], b2 = r.p[i], sl = Math.hypot(b2[0] - a2[0], b2[1] - a2[1]), dx = (b2[0] - a2[0]) / sl, dz = (b2[1] - a2[1]) / sl;
+        for (let s2 = 22; s2 < sl - 12; s2 += 42) KICK.push({ x: a2[0] + dx * s2, z: a2[1] + dz * s2, dx, dz, len: 7, wid: 6, hgt: 1.7 }); } }
   }
+  function kickAt(x, z) {
+    for (const k of KICK) { const u = (x - k.x) * k.dx + (z - k.z) * k.dz; if (u < 0 || u > k.len) continue; const v = -(x - k.x) * k.dz + (z - k.z) * k.dx; if (Math.abs(v) <= k.wid / 2) return k.hgt * Math.pow(u / k.len, 1.6); }
+    return 0;
+  }
+  const wrap = a2 => Math.atan2(Math.sin(a2), Math.cos(a2));
+  function fall(why) {
+    if (sk.fallT > 0) return;
+    sk.fallT = 1.7; sk.air = false; sk.spinV = 0; sk.edge = 0; runTrack = null;
+    noise("lowpass", 700, 120, 0.4, 0.4); toast(why || "Wipeout!", 1300);
+  }
+  function land(g) {
+    const sp = Math.hypot(sk.vx, sk.vz), travel = Math.atan2(sk.vx, sk.vz), d = Math.abs(wrap(sk.h - travel)), sw = d > Math.PI / 2, off = sw ? Math.PI - d : d;
+    sk.air = false; sk.y = g; const impact = -sk.vy; sk.vy = 0; sk.spinV = 0;
+    if (off > 0.65 || impact > 15) { fall(impact > 15 ? "Too big! Wipeout!" : "Landed sideways! Wipeout!"); return; }
+    sk.h = sw ? travel + Math.PI : travel;                                     // land forward or switch (backwards)
+    const spins = Math.round(Math.abs(sk.spin) / Math.PI) * 180, air = sk.airT;
+    if (air > 0.45) {
+      const name = (spins >= 180 ? `${spins}${sw ? " (switch)" : ""}` : "Air") + (sk.grabbed ? " + grab" : "");
+      const pts = Math.round(air * 100 + spins * 1.2 + (sk.grabbed ? 80 : 0)); tricks += pts; if (air > bestAir) bestAir = air;
+      toast(`${name}! ${air.toFixed(1)} s · +${pts}`, 1500); tone("triangle", 520 + spins, 880 + spins, 0.18, 0.09);
+    }
+    noise("lowpass", 900, 200, 0.12, Math.min(0.35, 0.1 + impact * 0.02)); sk.speedLoss = 0.1 * off;
+    const k = 1 - Math.min(0.5, off * 0.6 + impact * 0.01); sk.vx *= k; sk.vz *= k;
+  }
+  function stepSki(dt) {
+    if (sk.fallT > 0) {                                                        // sliding to a stop, then back up
+      sk.fallT -= dt; const k = Math.exp(-3.5 * dt); sk.vx *= k; sk.vz *= k;
+      sk.x = clamp(sk.x + sk.vx * dt, 5, (NX - 1) * CELL - 5); sk.z = clamp(sk.z + sk.vz * dt, 5, (NZ - 1) * CELL - 5); sk.y = ground(sk.x, sk.z);
+      if (sk.fallT <= 0) { sk.vx = sk.vz = 0; const [gx, gz] = groundSlope(sk.x, sk.z); if (Math.hypot(gx, gz) > 0.01) sk.h = Math.atan2(-gx, -gz); }
+      return;
+    }
+    const steerIn = (inp.left ? 1 : 0) - (inp.right ? 1 : 0);
+    sk.edge += (steerIn - sk.edge) * Math.min(1, dt * (steerIn ? 3.4 : 5.5));   // how far you lean the skis on edge
+    if (sk.air) {
+      sk.vy -= 9.81 * dt; const k = 1 - 0.002 * Math.hypot(sk.vx, sk.vz) * dt; sk.vx *= k; sk.vz *= k;
+      sk.spinV += (steerIn * 7 - sk.spinV) * Math.min(1, dt * 9); sk.h += sk.spinV * dt; sk.spin += sk.spinV * dt;   // spin with ◀ ▶
+      if (inp.tuck) sk.grabbed = true;
+      sk.x = clamp(sk.x + sk.vx * dt, 5, (NX - 1) * CELL - 5); sk.z = clamp(sk.z + sk.vz * dt, 5, (NZ - 1) * CELL - 5); sk.y += sk.vy * dt; sk.airT += dt;
+      const g = ground(sk.x, sk.z); if (sk.y <= g) land(g);
+      return;
+    }
+    const [gx, gz] = groundSlope(sk.x, sk.z), n2 = 1 + gx * gx + gz * gz;
+    let vx = sk.vx - 9.81 * gx / n2 * dt, vz = sk.vz - 9.81 * gz / n2 * dt;   // gravity down the fall line
+    const sp = Math.hypot(vx, vz), brake = inp.brake && sp > 1.2;
+    // the skis turn: carving follows the sidecut arc (radius 9 m at full edge), and you can pivot when slow
+    if (!brake) sk.h += (sp * sk.edge / 9 + steerIn * 1.7 * Math.max(0, 1 - sp / 6)) * dt;
+    else {                                                                      // hockey stop: throw the skis sideways
+      if (!sk.brakeSide) sk.brakeSide = steerIn || (wrap(sk.h - Math.atan2(vx, vz)) >= 0 ? 1 : -1);
+      const want = Math.atan2(vx, vz) + sk.brakeSide * 1.35; sk.h += clamp(wrap(want - sk.h), -7 * dt, 7 * dt);
+    }
+    if (!brake) sk.brakeSide = 0;
+    // the edges pull your direction of travel toward where the skis point (up to their grip), the rest is skid
+    sk.skid = 0;
+    if (sp > 0.05) {
+      const fx = Math.sin(sk.h), fz = Math.cos(sk.h), dir = vx * fx + vz * fz >= 0 ? 1 : -1;
+      const travel = Math.atan2(vx, vz), th = wrap(Math.atan2(fx * dir, fz * dir) - travel);
+      const grip = 9.81 * (0.6 + 0.95 * Math.abs(sk.edge)) * (brake ? 0.3 : 1);
+      const turn = clamp(th, -grip * dt / Math.max(sp, 1), grip * dt / Math.max(sp, 1)), nt = travel + turn;
+      vx = Math.sin(nt) * sp; vz = Math.cos(nt) * sp;
+      sk.skid = Math.abs(Math.sin(th - turn));
+    }
+    // friction: snow (groomed is faster), skidding scrubs speed, the trees are deep powder, and air drag
+    const onRun = runNow && runNow.d < runNow.r.width * 0.6;
+    const mu = (onRun ? 0.034 : 0.07) + 0.5 * sk.skid + (brake ? 0.25 : 0) + (!onRun && inTrees(sk.x, sk.z) > 2 ? 0.12 : 0);
+    const cda = inp.tuck ? 0.0021 : 0.0046 + Math.abs(sk.edge) * 0.0008;
+    let sp2 = Math.hypot(vx, vz); const dec = (mu * 9.81 / Math.sqrt(n2) + cda * sp2 * sp2) * dt, k = sp2 > 1e-4 ? Math.max(0, sp2 - dec) / sp2 : 0; vx *= k; vz *= k; sp2 *= k;
+    if (inp.brake && sp2 < 2) { const hold = Math.exp(-8 * dt); vx *= hold; vz *= hold; sp2 *= hold; }               // edges dug in: stay put
+    if (inp.tuck && sp2 < 6) { vx += Math.sin(sk.h) * 2.8 * dt; vz += Math.cos(sk.h) * 2.8 * dt; sk.skate += dt; }   // skate on the flats
+    if (inp.tuck && sp2 < 1.1) { vx = Math.sin(sk.h) * 1.1; vz = Math.cos(sk.h) * 1.1; }                                // walk if stuck
+    // move; leave the ground if it drops away faster than you'd fall (kicker lips, rolls), or ollie
+    const nx = clamp(sk.x + vx * dt, 5, (NX - 1) * CELL - 5), nz = clamp(sk.z + vz * dt, 5, (NZ - 1) * CELL - 5), gNew = ground(nx, nz);
+    const fallY = sk.y + sk.vy * dt - 4.9 * dt * dt;
+    sk.vx = vx; sk.vz = vz; sk.x = nx; sk.z = nz;
+    if (inp.jump && !sk.jumped) { sk.jumped = true; sk.vy = Math.max(sk.vy, 0) + 4.3; sk.y = gNew + 0.02; startAir(); tone("sine", 300, 520, 0.08, 0.05); return; }
+    if (!inp.jump) sk.jumped = false;
+    if (fallY > gNew + 0.08 && sp2 > 6) { sk.y = fallY; startAir(); return; }
+    sk.vy = clamp((gNew - sk.y) / dt, -30, 30); sk.y = gNew;
+    // trees are solid
+    const ci = (sk.x / 10) | 0, cj = (sk.z / 10) | 0;
+    for (let b2 = -1; b2 <= 1; b2++) for (let a2 = -1; a2 <= 1; a2++) { const list = V.treeCells.get((ci + a2) + "," + (cj + b2)); if (!list) continue;
+      for (const [tx, tz, ts] of list) { const dx = sk.x - tx, dz = sk.z - tz, d = Math.hypot(dx, dz), r = 0.55 * ts + 0.35;
+        if (d < r) { if (sp2 > 5) { sk.vx = dx / d * 2; sk.vz = dz / d * 2; fall("Ouch, a tree! Wipeout!"); return; } sk.x = tx + dx / d * r; sk.z = tz + dz / d * r; sk.vx *= 0.3; sk.vz *= 0.3; } } }
+  }
+  function startAir() { sk.air = true; sk.airT = 0; sk.spin = 0; sk.spinV = 0; sk.grabbed = false; }
   // ---------- lifts ----------
   function liftNear() { let best = null; for (const l of L) { const d = Math.hypot(sk.x - l.x0, sk.z - l.z0); if (d < 26 && (!best || d < best.d)) best = { l, d }; } return best && best.l; }
   function rideLift(l) {
@@ -658,9 +753,23 @@
     const [gx, gz] = groundSlope(sk.x, sk.z); if (Math.hypot(gx, gz) > 0.02) sk.h = Math.atan2(-gx, -gz);
     sk.vx = Math.sin(sk.h) * 3; sk.vz = Math.cos(sk.h) * 3; snapCam(); toast(`Top of ${l.name} · ${TO_FT(sk.y).toLocaleString()} ft`, 2200);
   }
-  function placeAt(px, py) { sk.x = WX(px); sk.z = WZ(py); sk.y = height(sk.x, sk.z); sk.vx = sk.vz = sk.vy = 0; sk.air = false; sk.ride = null; const [gx, gz] = groundSlope(sk.x, sk.z); sk.h = Math.hypot(gx, gz) > 0.01 ? Math.atan2(-gx, -gz) : 0; snapCam(); }
+  function placeAt(px, py) { sk.x = WX(px); sk.z = WZ(py); sk.y = height(sk.x, sk.z); sk.vx = sk.vz = sk.vy = 0; sk.air = false; sk.ride = null; sk.fallT = 0; sk.edge = 0; V.lastTrack = null; const [gx, gz] = groundSlope(sk.x, sk.z); sk.h = Math.hypot(gx, gz) > 0.01 ? Math.atan2(-gx, -gz) : 0; snapCam(); }
   function snapCam() { if (!V.cam) return; const sd = sk.ride ? 7 : 0, bx = sk.x - Math.sin(sk.h) * 8 + Math.cos(sk.h) * sd, bz = sk.z - Math.cos(sk.h) * 8 - Math.sin(sk.h) * sd; V.cam.set(bx, Math.max(sk.y + 4, height(bx, bz) + 2.2), bz); V.look.set(sk.x + Math.sin(sk.h) * 6, sk.y + 0.5, sk.z + Math.cos(sk.h) * 6); }
 
+  // ---------- sound: wind grows with speed, carving hiss, skid scrape ----------
+  let snd = null;
+  function startSound() {
+    if (!actx || snd) return;
+    const mk = (type, f, q) => { const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; const fl = actx.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = actx.createGain(); g.gain.value = 0; src.connect(fl).connect(g).connect(actx.destination); src.start(); return g; };
+    snd = { wind: mk("lowpass", 500, 0.7), hiss: mk("bandpass", 4200, 1.2), scrape: mk("bandpass", 1300, 2.5) };
+  }
+  function updateSound(on) {
+    if (!snd) return;
+    const now = actx.currentTime, sp = Math.hypot(sk.vx, sk.vz), live = on && soundOn && !sk.ride, ground2 = live && !sk.air && sk.fallT <= 0;
+    snd.wind.gain.setTargetAtTime(live ? Math.min(0.22, sp * sp * 0.00028) : 0, now, 0.1);
+    snd.hiss.gain.setTargetAtTime(ground2 ? Math.min(0.06, sp * (0.0015 + Math.abs(sk.edge) * 0.0025)) : 0, now, 0.05);
+    snd.scrape.gain.setTargetAtTime(ground2 ? Math.min(0.12, sp * sk.skid * 0.012 + (inp.brake && sp > 2 ? 0.05 : 0)) : 0, now, 0.05);
+  }
   // ---------- trail map overlay ----------
   function drawMap() {
     const cv = $("mapCanvas"), box = $("mapBox"), w = box.clientWidth, h = box.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
@@ -708,7 +817,7 @@
     save: { start: "village", sound: true, skied: [], topSpeed: 0 },
     persist() { this.save.skied = [...skied]; store.set(this.saveKey, this.save); },
     load(d) { if (STARTS[d.start]) this.save.start = d.start; if (typeof d.sound === "boolean") this.save.sound = d.sound; if (Array.isArray(d.skied)) d.skied.forEach(n => skied.add(n)); this.save.topSpeed = d.topSpeed | 0; },
-    init() { buildHeights(); buildScene(); placeAt(...STARTS.village); },
+    init() { buildHeights(); buildKickers(); buildScene(); placeAt(...STARTS.village); },
     onKey(k) { if (k === "e" || k === "enter") rideLift(nearLift); if (k === "m") openMap($("mapBox").classList.contains("hidden")); if (k === "r" && sk.ride) sk.ride.t0 = t - sk.ride.dur; },
     onScreen(st) { $("touch").classList.toggle("hidden", !(isTouch && st === "play")); $("skiHud").classList.toggle("hidden", st !== "play"); if (st !== "play") openMap(false); },
     renderMenu() {
@@ -716,12 +825,13 @@
       o.appendChild(seg("Start at", "startSeg", [["village", "Village"], ["pluto", "Mt. Pluto"], ["zephyr", "Zephyr"], ["lookout", "Lookout"]], s.start, v => { s.start = v; this.persist(); this.renderMenu(); }));
       $("record").textContent = `Runs skied: ${skied.size} of ${RUNS.length}` + (s.topSpeed ? ` · Top speed: ${s.topSpeed} km/h` : "");
       $("menuSub").textContent = `All ${LIFTS.length} lifts and ${RUNS.length} runs of Northstar, right where they are on the trail map. Ski anywhere, ride the lifts, and try to ski every run!`;
-      $("help").innerHTML = `<p><b>Ski:</b> ◀ ▶ (or A/D) to turn, <b>TUCK</b> (▲ or W) to go faster or skate on the flats, <b>BRAKE</b> (▼ or S) to slow down, <b>JUMP</b> (Space).</p>
+      $("help").innerHTML = `<p><b>Ski:</b> ◀ ▶ (or A/D, arrows) put your skis on edge to carve. A gentle lean carves smooth arcs and keeps your speed; hold it hard and the skis skid and slow you down. <b>BRAKE</b> (▼ or S) = hockey stop. <b>TUCK</b> (▲ or W) = go faster, or skate on the flats. <b>JUMP</b> (Space) = ollie.</p>
+        <p><b>Air:</b> hit the kickers in the terrain parks (orange runs). In the air, ◀ ▶ spins and TUCK grabs. Land facing down the hill (or backwards!) or you'll wipe out. Trees are solid!</p>
         <p><b>Lifts:</b> ski to the bottom of a lift and press <b>RIDE</b> (or E). Skip the ride with ▶▶ (or R). <b>MAP</b> (or M) shows the trail map. Tap a lift on the map to go there.</p>
         <p>Run signs at the top of each run show the name and how hard it is: ● green, ■ blue, ◆ black, ◆◆ experts, orange = terrain park. The trees are deep powder: they slow you down.</p>
         <p style="opacity:0.7">Unofficial fan game, traced from the public trail map. Not affiliated with Northstar California. <b>P</b> pause · <b>F</b> full screen</p>`;
     },
-    start() { const s = STARTS[this.save.start]; placeAt(s[0], s[1]); t = 0; topSpeed = 0; distance = 0; vertical = 0; lastY = sk.y; runTrack = null; for (const k in touchHeld) touchHeld[k] = false; toast(`Welcome to ${s[2]}!`, 2000); this.onScreen("play"); },
+    start() { startSound(); tricks = 0; const s = STARTS[this.save.start]; placeAt(s[0], s[1]); t = 0; topSpeed = 0; distance = 0; vertical = 0; lastY = sk.y; runTrack = null; for (const k in touchHeld) touchHeld[k] = false; toast(`Welcome to ${s[2]}!`, 2000); this.onScreen("play"); },
     reset() {},
     update(dt) {
       t += dt;
@@ -734,7 +844,19 @@
         const spd = Math.hypot(sk.vx, sk.vz); distance += spd * dt; if (sk.y < lastY) vertical += lastY - sk.y; lastY = sk.y;
         const kmh = Math.round(spd * 3.6); if (kmh > topSpeed) topSpeed = kmh;
         if (kmh > this.save.topSpeed && kmh < 200) this.save.topSpeed = kmh;
-        if (Math.random() < dt * spd * 0.6 && !sk.air) noise("highpass", 3500, 2500, 0.06, Math.min(0.05, spd * 0.002));
+        // snow spray when skidding or stopping, and ski tracks in the snow
+        if (!sk.air && sk.fallT <= 0 && spd > 4 && (sk.skid > 0.25 || inp.brake)) for (let i = 0; i < 2; i++) { const p = V.spray[V.sprayI++ % V.spray.length];
+          p.life = 0; p.x = sk.x; p.y = sk.y + 0.1; p.z = sk.z; p.vx = sk.vx * 0.4 + rand(-1.5, 1.5); p.vy = rand(1.5, 3.5); p.vz = sk.vz * 0.4 + rand(-1.5, 1.5); p.m.visible = true; }
+        if (!sk.air && sk.fallT <= 0 && spd > 1.5) {
+          const rx = Math.cos(sk.h) * 0.13, rz = -Math.sin(sk.h) * 0.13, pts = [[sk.x - rx, sk.z - rz], [sk.x + rx, sk.z + rz]];
+          if (V.lastTrack && Math.hypot(sk.x - V.lastTrack.x, sk.z - V.lastTrack.z) > 0.6) {
+            for (let s2 = 0; s2 < 2; s2++) { const a2 = V.lastTrack.p[s2], b2 = pts[s2], i0 = (V.trackN % V.trackMax) * 18, P = V.trackPos, w2 = 0.05, ya = ground(a2[0], a2[1]) + 0.04, yb = ground(b2[0], b2[1]) + 0.04;
+              const q = [[a2[0] - rx * w2 / 0.13, ya, a2[1] - rz * w2 / 0.13], [a2[0] + rx * w2 / 0.13, ya, a2[1] + rz * w2 / 0.13], [b2[0] - rx * w2 / 0.13, yb, b2[1] - rz * w2 / 0.13]];
+              const q2 = [q[1], [b2[0] + rx * w2 / 0.13, yb, b2[1] + rz * w2 / 0.13], q[2]];
+              [...q, ...q2].forEach((v, k2) => { P[i0 + k2 * 3] = v[0]; P[i0 + k2 * 3 + 1] = v[1]; P[i0 + k2 * 3 + 2] = v[2]; }); V.trackN++; }
+            V.trackGeo.setDrawRange(0, Math.min(V.trackN, V.trackMax) * 6); V.trackGeo.attributes.position.needsUpdate = true; V.lastTrack = { x: sk.x, z: sk.z, p: pts };
+          } else if (!V.lastTrack) V.lastTrack = { x: sk.x, z: sk.z, p: pts };
+        } else V.lastTrack = null;
       }
       // which run am I on? (and did I ski most of it?)
       if (t - lastRunCheck > 0.15) {
@@ -754,6 +876,7 @@
         { label: "KM/H", value: sk.ride ? "–" : Math.round(Math.hypot(sk.vx, sk.vz) * 3.6) },
         { label: "FT", value: TO_FT(sk.y).toLocaleString() },
         { label: "RUNS", value: `${skied.size}/${RUNS.length}` },
+        ...(tricks ? [{ label: "TRICKS", value: tricks, color: "#ff8a1f" }] : []),
       ]);
     },
     render(dt, st) {
@@ -770,30 +893,39 @@
         }
         inst.instanceMatrix.needsUpdate = true;
       }
-      // you: lean into turns, crouch in a tuck, sit on the chair
-      const me = V.me;
+      // you: lean into turns (angulation), knees bend, tuck, sit on the chair, spin in the air, fall over
+      const me = V.me, spdNow = Math.hypot(sk.vx, sk.vz);
+      me.g.rotation.order = "YXZ";
       me.g.position.set(sk.x, sk.y, sk.z); me.g.rotation.y = sk.h + Math.PI;
-      me.g.rotation.z = sk.lean * 0.35;
-      const crouch = sk.ride && sk.ride.l.type !== "platter" ? 0.55 : inp.tuck ? 0.35 : inp.brake ? 0.15 : 0.08;
-      me.legs.forEach(lg => lg.rotation.x = -crouch * 1.4); me.upper.rotation.x = crouch * 0.9; me.upper.position.y = 1.02 - crouch * 0.35;
-      me.arm.rotation.y = inp.tuck ? 1.4 : 0.9; me.armIn.rotation.z = -0.9; me.offArm.rotation.x = inp.tuck ? -1.0 : -0.3;
-      V.skis.forEach(s2 => s2.rotation.y = inp.brake && !sk.ride ? (s2 === V.skis[0] ? 0.25 : -0.25) : 0);
-      // camera: behind you, looking down the hill (or up the lift line while riding)
-      const spd = Math.hypot(sk.vx, sk.vz);
+      const leanWant = sk.ride ? 0 : -sk.edge * Math.min(0.55, spdNow / 25 + 0.1);
+      me.lean = lerp(me.lean || 0, leanWant, Math.min(1, dt * 8)); me.g.rotation.z = me.lean;
+      if (sk.fallT > 0) { me.g.rotation.x = lerp(me.g.rotation.x, -1.35, Math.min(1, dt * 8)); me.g.position.y = sk.y + 0.15; }
+      else me.g.rotation.x = lerp(me.g.rotation.x, 0, Math.min(1, dt * 6));
+      const crouch = sk.ride && sk.ride.l.type !== "platter" ? 0.55 : sk.air ? (sk.grabbed ? 0.6 : 0.3) : inp.tuck ? 0.42 : inp.brake ? 0.22 : 0.1 + Math.abs(sk.edge) * 0.12;
+      me.crouch = lerp(me.crouch || 0, crouch, Math.min(1, dt * 10));
+      me.legs.forEach(lg => lg.rotation.x = -me.crouch * 1.4); me.upper.rotation.x = me.crouch * 0.9; me.upper.position.y = 1.02 - me.crouch * 0.35;
+      me.upper.rotation.y = sk.air ? 0 : -sk.edge * 0.25;
+      me.arm.rotation.y = inp.tuck ? 1.4 : 0.9; me.armIn.rotation.z = sk.air && sk.grabbed ? -1.5 : -0.9; me.offArm.rotation.x = inp.tuck ? -1.0 : -0.3;
+      V.skis.forEach(s2 => s2.rotation.y = 0);
+      // snow spray particles
+      for (const p of V.spray) { if (p.life > 0.8) { p.m.visible = false; continue; } p.life += dt; p.vy -= 9.81 * dt * 0.6; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.m.position.set(p.x, p.y, p.z); p.m.material.opacity = 0.8 * (1 - p.life / 0.8); p.m.scale.setScalar(0.8 + p.life * 2); }
+      updateSound(st === "play");
+      // camera: low and close behind you, looking down the hill; wider when you're fast (riding: behind the chair)
       let dx = Math.sin(sk.h), dz = Math.cos(sk.h);
-      if (spd > 3 && !sk.ride) { dx = lerp(dx, sk.vx / spd, 0.5); dz = lerp(dz, sk.vz / spd, 0.5); const l2 = Math.hypot(dx, dz); dx /= l2; dz /= l2; }
-      const portrait = innerHeight > innerWidth, back = sk.ride ? 11 : portrait ? 9 : 7.5, up = sk.ride ? 5 : portrait ? 4.2 : 3.3;
-      if (G.camera.fov !== (portrait ? 68 : 58)) { G.camera.fov = portrait ? 68 : 58; G.camera.updateProjectionMatrix(); }
-      const side = sk.ride ? 7 : 0;                                                             // on a lift: watch from beside the chair, clear of the towers
-      const want = V.tmp.set(sk.x - dx * back + dz * side, 0, sk.z - dz * back - dx * side); want.y = Math.max(height(want.x, want.z) + 2.2, sk.y + up);
-      V.cam.lerp(want, Math.min(1, dt * 4)); V.look.lerp(V.tmp.set(sk.x + dx * (sk.ride ? 14 : 6), sk.y + (sk.ride ? 2 : 0.5), sk.z + dz * (sk.ride ? 14 : 6)), Math.min(1, dt * 6));
-      V.cam.y = Math.max(V.cam.y, height(V.cam.x, V.cam.z) + 1.5);                          // never under the snow
-      G.camera.position.copy(V.cam); G.camera.lookAt(V.look);
+      if (spdNow > 3 && !sk.ride) { dx = sk.vx / spdNow; dz = sk.vz / spdNow; }
+      const portrait = innerHeight > innerWidth, back = sk.ride ? 11 : portrait ? 7.5 : 6.2, up = sk.ride ? 5 : portrait ? 3.4 : 2.6;
+      const fov = (portrait ? 68 : 60) + (sk.ride ? 0 : Math.min(20, spdNow * 0.4));
+      if (Math.abs(G.camera.fov - fov) > 0.2) { G.camera.fov = lerp(G.camera.fov, fov, Math.min(1, dt * 3)); G.camera.updateProjectionMatrix(); }
+      const want = V.tmp.set(sk.x - dx * back, 0, sk.z - dz * back); want.y = Math.max(height(want.x, want.z) + 1.8, sk.y + up);
+      V.cam.lerp(want, Math.min(1, dt * (sk.ride ? 4 : 5))); V.look.lerp(V.tmp.set(sk.x + dx * 8, sk.y + 0.4, sk.z + dz * 8), Math.min(1, dt * 7));
+      V.cam.y = Math.max(V.cam.y, height(V.cam.x, V.cam.z) + 1.2);
+      const shake = st === "play" && !sk.ride && !sk.air ? Math.min(0.05, spdNow * 0.0012 + sk.skid * 0.03) : 0;
+      G.camera.position.copy(V.cam).add(V.tmp.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake)); G.camera.lookAt(V.look);
       V.sun.position.set(sk.x - 320, sk.y + 260, sk.z - 60); V.sun.target.position.set(sk.x, sk.y, sk.z);
       if (!$("mapBox").classList.contains("hidden") && Math.random() < 0.1) drawMap();
     },
   });
-  if (DEBUG) window.__ski = { sk, inp, R, L, height, nearestRun, placeAt, rideLift, skied, WX, WZ, get runNow() { return runNow; }, get nearLift() { return nearLift; } };
+  if (DEBUG) window.__ski = { KICK, ground, get tricks() { return tricks; }, sk, inp, R, L, height, nearestRun, placeAt, rideLift, skied, WX, WZ, get runNow() { return runNow; }, get nearLift() { return nearLift; } };
 
   // ---------- flow buttons ----------
   $("playBtn").addEventListener("click", startGame);

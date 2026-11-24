@@ -81,7 +81,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Hippo Baby Squeaky Double Sled version 1.4" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Hippo Baby Squeaky Double Sled v1.4</div>
+<div id="__ver" aria-label="Hippo Baby Squeaky Double Sled version 1.5" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Hippo Baby Squeaky Double Sled v1.5</div>
 <canvas id="c"></canvas>
 <div id="hud" class="hidden">
   <div class="chip"><small>SCORE</small><span id="scoreNum">0</span></div>
@@ -133,6 +133,9 @@
 </div>
 
 <script>
+const __KC = { ArrowLeft: "arrowleft", ArrowRight: "arrowright", ArrowUp: "arrowup", ArrowDown: "arrowdown", Space: " ", Enter: "enter", NumpadEnter: "enter", Escape: "escape", ShiftLeft: "shift", ShiftRight: "shift" };
+const __KA = { uikeyinputleftarrow: "arrowleft", uikeyinputrightarrow: "arrowright", uikeyinputuparrow: "arrowup", uikeyinputdownarrow: "arrowdown", uikeyinputescape: "escape", left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", spacebar: " ", esc: "escape" };
+function __kn(e) { if (e.code && __KC[e.code]) return __KC[e.code]; if (e.code && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase(); const k = (e.key || "").toLowerCase(); return __KA[k] || k; }   // physical keys (iPad keyboards too)
 (() => {
   const $ = id => document.getElementById(id);
   const canvas = $("c");
@@ -597,7 +600,7 @@
   let keyHeld = 0;
   const JUMP_KEYS = [" ", "arrowup", "w", "shift", "enter"];
   addEventListener("keydown", e => {
-    const k = e.key.toLowerCase();
+    const k = __kn(e);
     if (k === " " || k.startsWith("arrow")) e.preventDefault();
     if (e.repeat) return;
     if (JUMP_KEYS.includes(k)) {
@@ -608,7 +611,7 @@
     else if (k === "escape" || k === "p") { if (state === "play") pauseGame(); else if (state === "pause") resume(); }
     else if (k === "f" && document.activeElement !== $("nameInput")) toggleFull();
   });
-  addEventListener("keyup", e => { if (JUMP_KEYS.includes(e.key.toLowerCase())) { keyHeld = Math.max(0, keyHeld - 1); if (!keyHeld && !held) release(); } });
+  addEventListener("keyup", e => { if (JUMP_KEYS.includes(__kn(e))) { keyHeld = Math.max(0, keyHeld - 1); if (!keyHeld && !held) release(); } });
   addEventListener("blur", () => { held = 0; keyHeld = 0; release(); if (state === "play") pauseGame(); });
 
   // =====================================================================

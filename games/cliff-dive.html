@@ -147,7 +147,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Cliff Dive version 1.2" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Cliff Dive v1.2</div>
+<div id="__ver" aria-label="Cliff Dive version 1.3" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Cliff Dive v1.3</div>
 <canvas id="c"></canvas>
 <div id="fade"></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -208,6 +208,9 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+const __KC = { ArrowLeft: "arrowleft", ArrowRight: "arrowright", ArrowUp: "arrowup", ArrowDown: "arrowdown", Space: " ", Enter: "enter", NumpadEnter: "enter", Escape: "escape", ShiftLeft: "shift", ShiftRight: "shift" };
+const __KA = { uikeyinputleftarrow: "arrowleft", uikeyinputrightarrow: "arrowright", uikeyinputuparrow: "arrowup", uikeyinputdownarrow: "arrowdown", uikeyinputescape: "escape", left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", spacebar: " ", esc: "escape" };
+function __kn(e) { if (e.code && __KC[e.code]) return __KC[e.code]; if (e.code && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase(); const k = (e.key || "").toLowerCase(); return __KA[k] || k; }   // physical keys (iPad keyboards too)
 (() => {
   const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   const $ = id => document.getElementById(id);
@@ -788,7 +791,7 @@
   // =====================================================================
   canvas.tabIndex = 0;
   addEventListener("keydown", e => {
-    const k = e.key.toLowerCase();
+    const k = __kn(e);
     if (e.code === "ShiftLeft" || e.code === "ShiftRight" || k === "shift") { fireCodes.add(e.code || "Shift"); if (state === "air") everTucked = true; return; }
     if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k) && state !== "menu") e.preventDefault();
     keys[k] = true;
@@ -800,7 +803,7 @@
     else if (k === "escape" && state !== "menu") toMenu();
   });
   addEventListener("keyup", e => {
-    const k = e.key.toLowerCase();
+    const k = __kn(e);
     if (e.code === "ShiftLeft" || e.code === "ShiftRight" || k === "shift") { fireCodes.delete(e.code || "Shift"); return; }
     keys[k] = false;
   });

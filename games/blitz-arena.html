@@ -200,7 +200,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Blitz Arena version 1.12" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Blitz Arena v1.12</div>
+<div id="__ver" aria-label="Blitz Arena version 1.13" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Blitz Arena v1.13</div>
 <canvas id="c"></canvas>
 
 <!-- HUD -->
@@ -310,6 +310,9 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+const __KC = { ArrowLeft: "arrowleft", ArrowRight: "arrowright", ArrowUp: "arrowup", ArrowDown: "arrowdown", Space: " ", Enter: "enter", NumpadEnter: "enter", Escape: "escape", ShiftLeft: "shift", ShiftRight: "shift" };
+const __KA = { uikeyinputleftarrow: "arrowleft", uikeyinputrightarrow: "arrowright", uikeyinputuparrow: "arrowup", uikeyinputdownarrow: "arrowdown", uikeyinputescape: "escape", left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", spacebar: " ", esc: "escape" };
+function __kn(e) { if (e.code && __KC[e.code]) return __KC[e.code]; if (e.code && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase(); const k = (e.key || "").toLowerCase(); return __KA[k] || k; }   // physical keys (iPad keyboards too)
 (() => {
   const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   const $ = id => document.getElementById(id);
@@ -2050,7 +2053,7 @@
   const FIRE_CODES = new Set(["ShiftLeft", "ShiftRight", "KeyF", "Enter", "NumpadEnter"]);
   const fireDown = new Set();
   addEventListener("keydown", e => {
-    const k = e.key.toLowerCase();
+    const k = __kn(e);
     if (state === "playing" && GAME_KEYS.has(k)) e.preventDefault();
     keys[k] = true;
     if (state !== "playing") return;
@@ -2069,7 +2072,7 @@
     else if (digit === "1" || digit === "2" || digit === "3") switchSlot(Number(digit) - 1);
   });
   addEventListener("keyup", e => {
-    const k = e.key.toLowerCase(); keys[k] = false;
+    const k = __kn(e); keys[k] = false;
     if (k === " ") jumpHeld = false;
     if (FIRE_CODES.has(e.code) || k === "shift" || k === "f" || k === "enter") {
       fireDown.delete(e.code || k);
