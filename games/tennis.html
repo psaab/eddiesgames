@@ -153,8 +153,8 @@
     { x: W / 2, y: -40, vx: 0, vy: 0, tx: W / 2, ty: -40, color: COLORS.p1, swing: 9, face: 1 },
     { x: W / 2, y: L + 40, vx: 0, vy: 0, tx: W / 2, ty: L + 40, color: COLORS.p2, swing: 9, face: -1 },
   ];
-  const ball = { x: W / 2, y: 0, z: 0, vx: 0, vy: 0, vz: 0, live: false, held: true, lastHitter: 0, bounces: 0 };
-  const sparks = [], marks = [];
+  const ball = { x: W / 2, y: 0, z: 0, vx: 0, vy: 0, vz: 0, spin: 0, side: 0, rot: 0, live: false, held: true, lastHitter: 0, bounces: 0 };
+  const sparks = [], marks = [], bounces = [], trail = [];
   let score = [0, 0], server = 0, serveSide = 1, state = "menu", t = 0, serveAt = 0, pending = null, flash = null, aiErr = 0, rally = 0;
 
   function placeForServe() {
@@ -162,12 +162,12 @@
     const sx = W / 2 + (server === 0 ? serveSide : -serveSide) * 70;
     s.x = s.tx = sx; s.y = s.ty = server === 0 ? -40 : L + 40;
     if (save.mode === 1 && server === 0) { r.tx = W / 2 - serveSide * 60; r.ty = L + 50; }
-    ball.held = true; ball.live = false; ball.x = s.x + 18 * s.face; ball.y = s.y; ball.z = 70; ball.vx = ball.vy = ball.vz = 0;
+    ball.held = true; ball.live = false; ball.x = s.x + 18 * s.face; ball.y = s.y; ball.z = 70; ball.vx = ball.vy = ball.vz = 0; ball.spin = ball.side = 0; trail.length = 0;
     serveAt = t + 1.1;
   }
   function startMatch() {
     score = [0, 0]; server = 0; serveSide = 1; pending = null; flash = null; rally = 0;
-    marks.length = 0;
+    marks.length = 0; bounces.length = 0;
     players[0].x = players[0].tx = W / 2; players[0].y = players[0].ty = -40;
     players[1].x = players[1].tx = W / 2; players[1].y = players[1].ty = L + 40;
     placeForServe();
@@ -241,32 +241,116 @@
   }
 
   // =====================================================================
-  // Movement
+  // Movement: players speed up and slow down (momentum) instead of teleporting
   // =====================================================================
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const ACCEL = 2400;
   function limit(p, who) {
+    const ox = p.x, oy = p.y;
     p.x = clamp(p.x, X0 + 20, X1 - 20);
     p.y = who === 0 ? clamp(p.y, Y0 + 20, NET - 26) : clamp(p.y, NET + 26, Y1 - 20);
+    if (p.x !== ox) p.vx = 0;
+    if (p.y !== oy) p.vy = 0;
   }
   function movePlayer(p, who, dt, speed) {
-    const ox0 = p.x, oy0 = p.y;
     if (ball.held && server === who) { p.vx = p.vy = 0; return; }       // stand still while serving
-    const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy), step = speed * dt;
-    if (d > step) { p.x += dx / d * step; p.y += dy / d * step; } else { p.x = p.tx; p.y = p.ty; }
+    const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
+    const want = Math.min(speed, d * 8);                                  // ease in to a stop
+    const wx = d > 0.5 ? dx / d * want : 0, wy = d > 0.5 ? dy / d * want : 0;
+    const ax = wx - p.vx, ay = wy - p.vy, a = Math.hypot(ax, ay), max = ACCEL * dt;
+    if (a > max) { p.vx += ax / a * max; p.vy += ay / a * max; } else { p.vx = wx; p.vy = wy; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
     limit(p, who);
-    p.vx = (p.x - ox0) / dt; p.vy = (p.y - oy0) / dt;
   }
 
-  // Send the ball to (tx, ty) landing after T seconds, always clearing the net when possible
-  function launch(tx, ty, T, hitter) {
-    ball.vx = (tx - ball.x) / T; ball.vy = (ty - ball.y) / T;
-    ball.vz = (0.5 * G * T * T - ball.z) / T;
-    const tn = (NET - ball.y) / ball.vy;
-    if (tn > 0 && tn < T) {
-      const zNet = ball.z + ball.vz * tn - 0.5 * G * tn * tn;
-      if (zNet < NET_H + 14) ball.vz += (NET_H + 14 - zNet) / tn;
+  // =====================================================================
+  // Ball physics: gravity, air drag, spin (Magnus effect), spin-dependent bounces, net cords.
+  // spin > 0 = topspin (dips, kicks forward), spin < 0 = slice/backspin (floats, skids low)
+  // side = sidespin (curves left/right)
+  // =====================================================================
+  const DRAG = 0.00042, MAG_TOP = 300, MAG_SIDE = 240, SMASH_H = 150;
+  function stepPhys(b, dt) {
+    const vh = Math.hypot(b.vx, b.vy), sp = Math.hypot(vh, b.vz), m = vh / 700;
+    const kd = DRAG * sp * dt;
+    b.vx -= b.vx * kd; b.vy -= b.vy * kd; b.vz -= b.vz * kd;
+    b.vz -= (G + b.spin * MAG_TOP * m) * dt;
+    if (vh > 1) { const px = -b.vy / vh, py = b.vx / vh; b.vx += px * b.side * MAG_SIDE * m * dt; b.vy += py * b.side * MAG_SIDE * m * dt; }
+    b.spin *= 1 - 0.12 * dt; b.side *= 1 - 0.12 * dt;
+    const py0 = b.y;
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    let ev = null;
+    if (!b.ghost && (py0 - NET) * (b.y - NET) < 0 && b.x > -30 && b.x < W + 30 && b.z < NET_H + 3) {
+      const back = () => { b.y = NET - Math.sign(b.vy) * 3; b.vy *= -0.12; b.vx *= 0.3; b.spin = 0; b.side = 0; };
+      if (b.z < NET_H - 5) { back(); ev = "net"; }
+      else if (b.cord === false ? false : Math.random() < 0.55) { b.vy *= 0.28; b.vx *= 0.5; b.vz = Math.max(b.vz, 75); b.spin = 0; b.side = 0; ev = "cord"; }
+      else { back(); b.vz = Math.max(b.vz, 40); ev = "net"; }
     }
+    if (b.z <= 0 && b.vz < 0) {
+      b.z = 0;
+      const fH = 0.82 + 0.1 * b.spin, fZ = 0.64 + 0.04 * b.spin;      // topspin kicks on, slice stays low and slows
+      b.vz = -b.vz * fZ; b.vx *= fH; b.vy *= fH;
+      if (vh > 1) { const kx = -b.vy / vh, ky = b.vx / vh; b.vx += kx * b.side * 35; b.vy += ky * b.side * 35; }
+      b.spin *= 0.5; b.side *= 0.6;
+      if (Math.abs(b.vz) < 30) b.vz = 0;
+      ev = ev || "bounce";
+    }
+    if (b.z <= 0 && b.vz === 0) { const f = 1 - 1.5 * dt; b.vx *= f; b.vy *= f; }   // rolling
+    if (b.z < 0) b.z = 0;
+    return ev;
+  }
+
+  // Fly a pretend ball to see where it lands (and how high it clears the net)
+  function simulate(x, y, z, vx, vy, vz, spin, side) {
+    const b = { x, y, z, vx, vy, vz, spin, side, ghost: true };
+    let tt = 0, netZ = null;
+    const dt = 1 / 90;
+    for (let i = 0; i < 450; i++) {
+      const py = b.y;
+      const ev = stepPhys(b, dt); tt += dt;
+      if (netZ === null && (py - NET) * (b.y - NET) <= 0 && py !== b.y) netZ = b.z;
+      if (ev === "bounce") return { x: b.x, y: b.y, t: tt, netZ };
+    }
+    return null;
+  }
+
+  // Work out how to hit the ball so it lands on (tx, ty) after about T seconds with the given spin,
+  // clearing the net by `margin`. Corrects the aim for drag and curve.
+  function solveShot(fx, fy, fz, tx, ty, T, spin, side, margin = 12) {
+    let ax = tx, ay = ty, best = null;
+    for (let pass = 0; pass < 3; pass++) {
+      const dx = ax - fx, dy = ay - fy, dist = Math.hypot(dx, dy) || 1, ux = dx / dist, uy = dy / dist;
+      const crosses = (fy - NET) * (ay - NET) < 0;
+      let H = dist / T * 1.08, sol = null;
+      for (let tries = 0; tries < 7 && !sol; tries++) {
+        let lo = -300, hi = 1100, res = null;
+        for (let it = 0; it < 20; it++) {
+          const vz = (lo + hi) / 2, r = simulate(fx, fy, fz, ux * H, uy * H, vz, spin, side);
+          const along = r ? (r.x - fx) * ux + (r.y - fy) * uy : Infinity;
+          if (along > dist) hi = vz; else lo = vz;
+          res = { vz, r };
+        }
+        if (!res.r) { H *= 0.9; continue; }
+        if (crosses && (res.r.netZ === null || res.r.netZ < NET_H + margin)) { H *= 0.88; continue; }
+        sol = { vx: ux * H, vy: uy * H, vz: res.vz, land: res.r };
+      }
+      if (!sol) break;
+      best = sol;
+      const ex = tx - sol.land.x, ey = ty - sol.land.y;
+      if (Math.hypot(ex, ey) < 5) break;
+      ax += ex; ay += ey;
+    }
+    return best;
+  }
+
+  function launch(tx, ty, T, hitter, spin = 0.4, side = 0) {
+    const sol = solveShot(ball.x, ball.y, ball.z, tx, ty, T, spin, side);
+    if (sol) { ball.vx = sol.vx; ball.vy = sol.vy; ball.vz = sol.vz; }
+    else {                                                                   // fallback: simple arc
+      ball.vx = (tx - ball.x) / T; ball.vy = (ty - ball.y) / T; ball.vz = (0.5 * G * T * T - ball.z) / T + 120;
+    }
+    ball.spin = spin; ball.side = side;
     ball.lastHitter = hitter; ball.bounces = 0; ball.live = true; ball.held = false;
+    predicted = null;
   }
 
   function serve() {
@@ -274,43 +358,64 @@
     ball.x = p.x + 14 * p.face; ball.y = p.y + 8 * p.face; ball.z = 95;
     const boxX = W / 2 - (who === 0 ? serveSide : -serveSide) * (W * 0.24) + (Math.random() - 0.5) * 50;
     const ty = who === 0 ? NET + SERVICE * (0.55 + Math.random() * 0.3) : NET - SERVICE * (0.55 + Math.random() * 0.3);
-    launch(boxX, ty, 0.95, who);
+    launch(boxX, ty, 0.9, who, 0.6, 0);                                     // kick serve with topspin
     p.swing = 0; hitSound(0.8);
     rally = 0;
   }
 
+  // Shot types come from how you're moving when you hit
+  const SHOTS = {
+    rally:  { depth: 330, T: 1.0,  spin: 0.5,  wobble: 50 },
+    drive:  { depth: 385, T: 0.78, spin: 1.0,  wobble: 60 },   // running at the net: heavy topspin
+    lob:    { depth: 410, T: 1.65, spin: 0.3,  wobble: 50 },   // backing away: high and deep
+    slice:  { depth: 300, T: 1.15, spin: -0.9, wobble: 45 },   // standing still: floaty backspin
+    volley: { depth: 230, T: 0.85, spin: -0.4, wobble: 40 },   // before it bounces: short and angled
+    smash:  { depth: 330, T: 0.5,  spin: 0.2,  wobble: 70 },   // ball up high: slam it down
+    drop:   { depth: 150, T: 1.1,  spin: -1.0, wobble: 30 },   // computer's touch shot
+  };
+
   function tryHit(who) {
     const p = players[who];
-    if (!ball.live || ball.lastHitter === who || ball.lastHitter === -1 || ball.z > HIT_H) return;
+    if (!ball.live || ball.lastHitter === who || ball.lastHitter === -1 || ball.z > SMASH_H) return;
     if ((who === 0) !== (ball.y < NET)) return;
     const dx = ball.x - p.x, dy = ball.y - p.y;
     if (Math.hypot(dx, dy) > REACH) return;
     const isAI = who === 1 && save.mode === 1;
     if (isAI && Math.random() < AI[save.diff].miss * (1 + rally * AI[save.diff].tire)) { ball.lastHitter = -1; return; }   // fluffs it
-    const off = clamp(dx / REACH, -1, 1);
-    const toward = who === 0 ? 1 : -1;
-    let tx, ty, T;
+    const off = clamp(dx / REACH, -1, 1), toward = who === 0 ? 1 : -1;
+    const fwd = (p.vy * toward) / RUN, speed = Math.hypot(p.vx, p.vy);
+    let kind;
+    if (ball.z > HIT_H) kind = "smash";
+    else if (ball.bounces === 0) kind = "volley";
+    else if (isAI) { const r = Math.random(), lv = AI[save.diff]; kind = r < lv.drop ? "drop" : r < lv.drop + 0.25 ? "drive" : r < lv.drop + 0.4 ? "slice" : r < lv.drop + 0.47 ? "lob" : "rally"; }
+    else if (fwd > 0.35) kind = "drive";
+    else if (fwd < -0.35) kind = "lob";
+    else if (speed < RUN * 0.15) kind = "slice";
+    else kind = "rally";
+    const shot = SHOTS[kind];
+    // Sweet spot: hitting with the middle of the racket at a comfy height is the most accurate
+    const heightOk = ball.z >= 15 && ball.z <= 65;
+    const quality = (1 - Math.max(0, Math.abs(off) - 0.6) * 1.2) * (heightOk || kind === "smash" || kind === "volley" ? 1 : 0.75);
+    let tx, ty, T = shot.T * (1 - Math.min(0.12, rally * 0.01));
     if (isAI) {
-      const lv = AI[save.diff];
-      const pick = Math.random();
-      // smarter levels hit into the corner away from where you're standing
+      const lv = AI[save.diff], pick = Math.random();
       const away = players[0].x < W / 2 ? W * (1 - lv.wide) : W * lv.wide;
       tx = (Math.random() < lv.smart ? away : pick < 0.4 ? W * lv.wide : pick < 0.8 ? W * (1 - lv.wide) : W / 2) + aiErr;
-      ty = NET + toward * (Math.random() < lv.drop ? 140 + Math.random() * 40 : 330 + Math.random() * 120);
-      T = lv.shotT * (0.9 + Math.random() * 0.2);
+      ty = NET + toward * (shot.depth + (Math.random() - 0.5) * 80);
+      T *= lv.shotT;
       aiErr = (Math.random() - 0.5) * 2 * lv.aimErr;
     } else {
-      // Where on the racket it hits picks the direction; running toward the net hits harder
-      tx = W / 2 + off * W * 0.62 + p.vx * 0.08;
-      const rush = clamp((p.vy * toward) / RUN, 0, 1);
-      ty = NET + toward * (300 + rush * 110 + (Math.random() - 0.5) * 60);
-      T = 1.02 - rush * 0.25 - Math.min(0.12, rally * 0.012);
-      tx = clamp(tx, -55, W + 55);
+      // Where on the racket it hits picks the direction (edges go wide, and can go out)
+      tx = clamp(W / 2 + off * W * (kind === "volley" ? 0.72 : 0.62) + p.vx * 0.08, -60, W + 60);
+      ty = NET + toward * (shot.depth + (Math.random() - 0.5) * 50);
     }
-    launch(tx, ty, T, who);
+    const wob = shot.wobble * (1.2 - quality);
+    tx += (Math.random() - 0.5) * wob; ty += (Math.random() - 0.5) * wob;
+    launch(tx, ty, T, who, shot.spin, -off * 0.6 * toward);
     p.swing = 0; rally++;
-    hitSound(Math.min(1, Math.hypot(ball.vx, ball.vy) / 1400));
-    burst(ball.x, ball.y, p.color, 8);
+    lastShot = kind;
+    hitSound(Math.min(1, Math.hypot(ball.vx, ball.vy) / 1300), kind);
+    burst(ball.x, ball.y, p.color, kind === "smash" ? 16 : 8);
   }
 
   function pointTo(who, reason, x, y) {
@@ -333,16 +438,11 @@
       ball.x = p.x + 18 * p.face; ball.y = p.y; ball.z = 70 + Math.sin(t * 6) * 4;
       return;
     }
-    const py = ball.y;
-    ball.x += ball.vx * dt; ball.y += ball.vy * dt;
-    ball.vz -= G * dt; ball.z += ball.vz * dt;
-    // Net
-    if (ball.live && (py - NET) * (ball.y - NET) <= 0 && py !== ball.y && ball.z < NET_H && ball.x > -30 && ball.x < W + 30) {
-      ball.y = NET - Math.sign(ball.vy) * 3; ball.vy *= -0.15; ball.vx *= 0.3; netSound();
-    }
-    // Bounce
-    if (ball.z <= 0 && ball.vz < 0) {
-      ball.z = 0; ball.vz = -ball.vz * 0.68; ball.vx *= 0.86; ball.vy *= 0.86;
+    const ev = stepPhys(ball, dt);
+    ball.rot = (ball.rot || 0) + (ball.spin * 25 + 4) * dt;
+    if (ev === "net") netSound();
+    if (ev === "cord") { netSound(); tone("triangle", 900, 600, 0.08, 0.06); }
+    if (ev === "bounce") {
       if (ball.live) {
         const side = ball.y < NET ? 0 : 1;
         const inside = ball.x >= -4 && ball.x <= W + 4 && ball.y >= -4 && ball.y <= L + 4;
@@ -350,24 +450,43 @@
           if (ball.lastHitter === -1) pointTo(side === 0 ? 1 : 0, "miss");                        // computer whiffed
           else if (side === ball.lastHitter) pointTo(1 - ball.lastHitter, "net");
           else if (!inside) pointTo(1 - ball.lastHitter, "out", ball.x, ball.y);
-          else { ball.bounces = 1; bounceSound(); }
+          else { ball.bounces = 1; bounceSound(); bounces.push({ x: ball.x, y: ball.y, at: t }); predicted = null; }
         } else pointTo(side === 0 ? 1 : 0, "twice");
       } else bounceSound(0.4);
-      if (Math.abs(ball.vz) < 30) ball.vz = 0;
     }
-    if (ball.z < 0) ball.z = 0;
   }
 
+  // Where can `who` reach the ball? Fly a pretend ball forward and find the first good hitting spot.
+  function predictHit(who, speed) {
+    const p = players[who];
+    const b = { x: ball.x, y: ball.y, z: ball.z, vx: ball.vx, vy: ball.vy, vz: ball.vz, spin: ball.spin, side: ball.side, cord: false };
+    let bounced = ball.bounces, tt = 0, fallback = null;
+    const dt = 1 / 60, mySide = y => (who === 0) === (y < NET);
+    for (let i = 0; i < 180; i++) {
+      const ev = stepPhys(b, dt); tt += dt;
+      if (ev === "net") return null;
+      if (ev === "bounce") { if (bounced >= 1) break; bounced++; }
+      if (!mySide(b.y) || b.z > HIT_H * 0.95) continue;
+      const good = bounced === 1 ? b.z >= 12 : Math.abs(b.y - NET) < 140;
+      if (!good) continue;
+      const need = Math.max(0, Math.hypot(b.x - p.x, b.y - p.y) - REACH * 0.55);
+      const cand = { x: b.x, y: b.y, t: tt };
+      fallback = cand;
+      if (need <= speed * tt * 0.8) return cand;
+    }
+    return fallback;
+  }
+
+  let predicted = null, predictAt = 0, lastShot = "";
   function updateAI(dt) {
     const p = players[1], lv = AI[save.diff];
     let tx, ty;
     if (ball.held) {
       if (server === 1) { tx = p.x; ty = p.y; } else { tx = W / 2 - serveSide * 60; ty = L + 50; }
-    } else if (ball.live && ball.lastHitter === 0 && ball.vy > 0) {
-      // predict where the ball will be when it reaches our hitting zone (after its bounce)
-      const yHit = clamp(ball.y + ball.vy * 1.2, NET + 120, L + 90);
-      const tt = (yHit - ball.y) / Math.max(1, ball.vy);
-      tx = ball.x + ball.vx * tt * 0.93 + aiErr * 0.4; ty = yHit - 30;
+    } else if (ball.live && ball.lastHitter === 0) {
+      if (!predicted || t > predictAt) { predicted = predictHit(1, lv.speed) || predicted; predictAt = t + 0.12; }
+      if (predicted) { tx = predicted.x + aiErr * 0.4; ty = predicted.y + 22; }
+      else { tx = W / 2 + (ball.x - W / 2) * 0.25; ty = L + 40; }
     } else {
       tx = W / 2 + (ball.x - W / 2) * 0.25; ty = L + 40;
     }
@@ -438,6 +557,10 @@
     line(W / 2, NET - SERVICE, W / 2, NET + SERVICE);
     line(W / 2, 0, W / 2, 14); line(W / 2, L, W / 2, L - 14);
     // Out marks where a ball landed out
+    for (const m of bounces) {
+      const a = Math.max(0, 1 - (t - m.at) / 1.4); if (!a) continue;
+      ctx.fillStyle = `rgba(255,255,255,${0.45 * a})`; ctx.beginPath(); ctx.ellipse(m.x, m.y, 7, 4, 0, 0, 7); ctx.fill();
+    }
     for (const m of marks) {
       const a = Math.max(0, 1 - (t - m.at) / 2.5); if (!a) continue;
       ctx.strokeStyle = `rgba(255,80,80,${a})`; ctx.lineWidth = 6;
@@ -477,10 +600,20 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const sp = toScreen(ball.x, ball.y), r = (9 + ball.z * 0.045) * s;
     const by = sp.y - ball.z * s * 0.55;
+    // trail: orange for topspin, blue for slice
+    if (!ball.held) {
+      trail.push({ x: sp.x, y: by, r }); if (trail.length > 10) trail.shift();
+      const col = ball.spin > 0.15 ? "255,150,60" : ball.spin < -0.15 ? "90,170,255" : "255,255,255";
+      trail.forEach((p, i) => { ctx.fillStyle = `rgba(${col},${(i / trail.length) * 0.35})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (0.4 + 0.6 * i / trail.length), 0, 7); ctx.fill(); });
+    }
     ctx.save(); ctx.shadowColor = COLORS.ball; ctx.shadowBlur = 10;
     ctx.fillStyle = COLORS.ball; ctx.beginPath(); ctx.arc(sp.x, by, r, 0, 7); ctx.fill(); ctx.restore();
-    ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = Math.max(1, r * 0.18);
-    ctx.beginPath(); ctx.arc(sp.x - r * 0.9, by, r * 0.75, -0.9, 0.9); ctx.stroke();
+    // the seam spins with the ball
+    ctx.save(); ctx.translate(sp.x, by); ctx.rotate(ball.rot || 0);
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = Math.max(1, r * 0.18);
+    ctx.beginPath(); ctx.arc(-r * 0.9, 0, r * 0.75, -0.9, 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(r * 0.9, 0, r * 0.75, Math.PI - 0.9, Math.PI + 0.9); ctx.stroke();
+    ctx.restore();
   }
   function drawScores() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -536,7 +669,11 @@
     const g = actx.createGain(); g.gain.setValueAtTime(vol, st); g.gain.exponentialRampToValueAtTime(0.001, st + dur);
     src.connect(f); f.connect(g); g.connect(actx.destination); src.start(st, Math.random() * 0.5); src.stop(st + dur + 0.03);
   }
-  const hitSound = k => { tone("sine", 420 + k * 260, 180, 0.08, 0.28); noise("bandpass", 2400, 1200, 0.05, 0.25); };
+  const hitSound = (k, kind) => {
+    tone("sine", 420 + k * 260, 180, 0.08, 0.28); noise("bandpass", 2400, 1200, 0.05, 0.25);
+    if (kind === "smash") { noise("lowpass", 1800, 200, 0.18, 0.35); tone("square", 220, 90, 0.12, 0.08); }
+    else if (kind === "slice" || kind === "drop") tone("sine", 700, 500, 0.05, 0.08);
+  };
   const bounceSound = (v = 1) => tone("sine", 230, 110, 0.07, 0.14 * v);
   const netSound = () => { noise("lowpass", 600, 120, 0.25, 0.3); };
   function pointSound(good) { tone("triangle", good ? 660 : 330, good ? 990 : 220, 0.25, 0.12); if (good) tone("triangle", 990, 1320, 0.2, 0.08, 0.1); }

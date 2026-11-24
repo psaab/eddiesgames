@@ -1,5 +1,5 @@
 // Arcade Blitz service worker: lets the games load offline and makes the site installable.
-const CACHE = "arcade-blitz-a0229be957";
+const CACHE = "arcade-blitz-b3e2b941c5";
 const SHELL = [
   "/",
   "/index.html",
