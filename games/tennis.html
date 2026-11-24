@@ -71,7 +71,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Tennis version 2.1" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Tennis v2.1</div>
+<div id="__ver" aria-label="Tennis version 2.2" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Tennis v2.2</div>
 <canvas id="c"></canvas>
 <div id="hud" class="hidden"><button id="pauseBtn" aria-label="Pause">II</button><button id="fsBtn" aria-label="Full screen">⛶</button></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -208,6 +208,7 @@
   // Input
   // =====================================================================
   const pointers = new Map(), keys = {};          // pointerId -> { who, role: "move" | "aim" }
+  let mouseAims = false;                           // true once you run with the keyboard: then the mouse only aims
   const hasRole = (who, role) => [...pointers.values()].some(v => v.who === who && v.role === role);
   function pointAt(who, role, p) {
     if (role === "move") { players[who].tx = p.x; players[who].ty = p.y; }
@@ -220,6 +221,10 @@
     const p = toCourt(e.clientX, e.clientY);
     let who = 0, role = "move";
     if (save.mode === 2) { who = p.y < NET ? 0 : 1; if (hasRole(who, "move")) role = "aim"; }
+    else if (e.pointerType === "mouse" && mouseAims) {
+      role = "aim";
+      if (ball.held && server === 0) serveAt = Math.min(serveAt, t + 0.1);   // click to serve
+    }
     else { if (p.y > NET) role = "aim"; else if (hasRole(0, "move")) return; }
     pointers.set(e.pointerId, { who, role });
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
@@ -232,7 +237,7 @@
     if (!v) {
       // a mouse just hovering: your side moves you, the other side moves your aim
       if (e.pointerType !== "mouse" || save.mode !== 1 || state !== "play") return;
-      v = { who: 0, role: p.y > NET ? "aim" : "move" };
+      v = { who: 0, role: mouseAims || p.y > NET ? "aim" : "move" };
     }
     pointAt(v.who, v.role, p);
   });
@@ -525,11 +530,9 @@
       const pd = pending; pending = null;
       if (pd.kind === "serve") placeForServe(); else { gameOver(pd.who); return; }
     }
-    const kv1 = keyVector("w", "s", "a", "d");
-    if (save.mode === 1) {
-      const ka = keyVector("arrowup", "arrowdown", "arrowleft", "arrowright");
-      if (ka) setAim(0, aim[0].x + ka.x * 420 * dt, aim[0].y + ka.y * 420 * dt);
-    } else {
+    const kv1 = keyVector("w", "s", "a", "d") || (save.mode === 1 ? keyVector("arrowup", "arrowdown", "arrowleft", "arrowright") : null);
+    if (kv1 && save.mode === 1 && !mouseAims) { mouseAims = true; canvas.style.cursor = "crosshair"; }
+    if (save.mode === 2) {
       const q = (keys.e ? 1 : 0) - (keys.q ? 1 : 0), r = (keys["."] ? 1 : 0) - (keys[","] ? 1 : 0);
       if (q) setAim(0, aim[0].x + q * 420 * dt);
       if (r) setAim(1, aim[1].x + r * 420 * dt);
@@ -591,10 +594,15 @@
     if (state === "play" || state === "pause") {
       for (const who of save.mode === 2 ? [0, 1] : [0]) {
         const a = aim[who], col = who === 0 ? "58,160,255" : "255,79,154", pulse = 1 + Math.sin(t * 5) * 0.08;
-        ctx.strokeStyle = `rgba(${col},0.9)`; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(a.x, a.y, 22 * pulse, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = `rgba(${col},0.18)`; ctx.fill();
-        ctx.lineWidth = 3; line(a.x - 10, a.y, a.x + 10, a.y); line(a.x, a.y - 10, a.x, a.y + 10);
+        const pl = players[who];
+        ctx.save(); ctx.setLineDash([8, 12]); ctx.lineDashOffset = -t * 30; ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 3;
+        line(pl.x, pl.y, a.x, a.y); ctx.restore();
+        // a bright target: dark edge, white ring, your color inside
+        const R = 22 * pulse;
+        ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(a.x, a.y, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.arc(a.x, a.y, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = `rgba(${col},0.55)`; ctx.beginPath(); ctx.arc(a.x, a.y, R - 3, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3; line(a.x - 9, a.y, a.x + 9, a.y); line(a.x, a.y - 9, a.x, a.y + 9);
       }
     }
     for (const m of bounces) {
@@ -735,7 +743,7 @@
   for (const b of $("modeSeg").children) b.addEventListener("click", () => { save.mode = Number(b.dataset.mode); persist(); renderMenu(); });
   for (const b of $("diffSeg").children) b.addEventListener("click", () => { save.diff = Number(b.dataset.diff); persist(); renderMenu(); });
   $("help").innerHTML = `<p><b>Move</b> your player and they swing on their own when the ball comes close.</p>
-    <p><b>Aim:</b> your shots go to the ring on the other side. Touch the other side of the court to move it (you can run with one hand and aim with the other). With a mouse, point at the other side. On a keyboard, WASD runs and the arrow keys aim.</p>
+    <p><b>Aim:</b> your shots go to the ring on the other side. <b>Computer:</b> run with WASD or the arrow keys and just point the mouse where you want the ball to go (click to serve). <b>iPad:</b> drag on your side to run and touch the other side to move the ring (one hand runs, the other aims).</p>
     <p><b>Shots:</b> run at the net for a hard topspin drive, back away for a lob, stand still for a slice, hit before the bounce to volley, and reach high balls to smash. Hit with the middle of the racket for the best accuracy, and careful near the lines!</p>
     <p><b>2 Players:</b> Blue WASD, Pink arrows. Aim with a second finger on your half (or Q/E for Blue, comma/period for Pink). Tap or press Space to serve sooner.</p>
     <p>You win a point if the other player misses, hits into the net, or hits it out. <b>P</b> pause · <b>F</b> full screen</p>`;
