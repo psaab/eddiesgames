@@ -2,11 +2,21 @@
 
 Every game shows its version in the bottom corner, and the hub shows its own version at the bottom of the page.
 
-## Arcade Blitz — v1.3
+## Arcade Blitz — v1.4
+- **v1.4** — Three new 3D games: Badminton, Baseball and Drift
 - **v1.3** — Tennis is now 3D
 - **v1.2** — Version numbers on every game, the hub and a changelog
 - **v1.1** — Installable app (Add to Home Screen), offline play, hosted on Vercel
 - **v1.0** — Arcade Blitz home page with an idea box
+
+## Badminton — v1.0
+- **v1.0** — First version: 3D hall, real shuttlecock flight, clears, drops and jump smashes, computer or 2 players
+
+## Baseball — v1.0
+- **v1.0** — First version: 3D ballpark, 4 pitch types, timing and placement batting, fielders, Home Run Derby and 3 Innings
+
+## Drift — v1.0
+- **v1.0** — First version: 3D circuit, tire grip physics with controllable drifts, smoke, skid marks, combos, touch buttons
 
 ## Blitz Arena — v1.12
 - **v1.12** — A and D turn you all the way around
