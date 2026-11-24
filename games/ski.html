@@ -74,7 +74,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Ski Northstar version 2.0" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Ski Northstar v2.0</div>
+<div id="__ver" aria-label="Ski Northstar version 2.1" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Ski Northstar v2.1</div>
 <canvas id="c3" tabindex="0"></canvas>
 <div id="board" class="hidden"></div>
 <div id="touch" class="hidden">
@@ -424,6 +424,12 @@
     ["Promised Land Express", "quad", [1390, 800], [985, 565]],
     ["Martis Camp Express", "quad", [1220, 1265], [1220, 875]],
     ["Lookout Link", "platter", [925, 862], [1065, 885]],
+    // magic carpets in the learning areas (the trail map doesn't mark them exactly)
+    ["Hemlock Carpet", "carpet", [520, 1188], [556, 1178]],
+    ["Juniper Carpet", "carpet", [505, 1205], [545, 1196]],
+    ["Sugar Pine Carpet", "carpet", [538, 1216], [578, 1206]],
+    ["The Spruces Carpet", "carpet", [232, 1462], [266, 1448]],
+    ["Jeffrey Pines Carpet", "carpet", [262, 1478], [298, 1466]],
   ];
   const LODGES = [
     ["The Village at Northstar", [190, 1452], 3], ["Lodge at Big Springs", [430, 1150], 2], ["Zephyr Lodge", [935, 812], 1.4],
@@ -437,7 +443,9 @@
   const FT = ft => (ft - 6330) * 0.3048 * 0.85;                    // feet -> meters above the Village (a touch flatter than real)
   const TO_FT = m => Math.round(m / 0.85 / 0.3048 + 6330);
   const DIFF = { g: ["●", "#2fa84f", "Easier"], b: ["■", "#2e7bff", "More Difficult"], k: ["◆", "#111111", "Most Difficult"], kk: ["◆◆", "#111111", "Experts Only"], gl: ["◆", "#111111", "Gladed Trees"], p: ["▬", "#ff8a1f", "Terrain Park"] };
-  const RIDE_TIME = { six: 26, quad: 28, triple: 30, chondola: 28, gondola: 24, platter: 14 };
+  const RIDE_TIME = { six: 26, quad: 28, triple: 30, chondola: 28, gondola: 24, platter: 14, carpet: 16 };
+  const LIFT_INFO = { six: ["High-speed six-pack", 6], quad: ["Quad chair", 4], triple: ["Triple chair", 3], chondola: ["Chondola (chairs + cabins)", 6], gondola: ["Gondola", 0], platter: ["Platter", 1], carpet: ["Magic carpet", 0] };
+  const JACKETS = [0xe63b2e, 0x2e7bff, 0xffc21a, 0x22b35a, 0x9b59b6, 0xff7a1a, 0x1abc9c, 0xf2f2f2, 0x222222, 0xff4f9a];
   const NX = Math.ceil((X1 - X0) * PX / CELL) + 1, NZ = Math.ceil((Y1 - Y0) * PX / CELL) + 1;
   let H = null;
   // ---------- terrain from the map's elevations ----------
@@ -487,6 +495,12 @@
     return best;
   }
   const L = LIFTS.map(([name, type, b, t]) => { const x0 = WX(b[0]), z0 = WZ(b[1]), x1 = WX(t[0]), z1 = WZ(t[1]); return { name, type, x0, z0, x1, z1, len: Math.hypot(x1 - x0, z1 - z0) }; });
+  // where a carrier hangs on the cable: k = 0 bottom .. 1 top, side +1 = going up, -1 = coming down (cable sags between towers)
+  function cableAt(l, k, side) {
+    const seg = clamp(k, 0, 1) * (l.path.length - 1), a = Math.min(l.path.length - 2, Math.floor(seg)), u = seg - a, p0 = l.path[a], p1 = l.path[a + 1];
+    const off = side * l.gauge / 2;
+    return [lerp(p0[0], p1[0], u) + l.perp[0] * off, lerp(p0[1], p1[1], u) - l.sag * 4 * u * (1 - u), lerp(p0[2], p1[2], u) + l.perp[1] * off];
+  }
   function liftDist(x, z) { let best = Infinity; for (const l of L) best = Math.min(best, segDist(x, z, [l.x0, l.z0], [l.x1, l.z1])[0]); return best; }
 
   // ---------- skier state ----------
@@ -571,29 +585,113 @@
     V.spray = []; const sprayGeo = new T3.SphereGeometry(0.14, 6, 4);
     for (let i = 0; i < 60; i++) { const m = mesh(sprayGeo, new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false })); m.visible = false; scene.add(m); V.spray.push({ m, life: 9, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }); }
     V.sprayI = 0; V.lastTrack = null;
-    // lifts: towers, cables, terminals and moving chairs / gondola cabins
+    // lifts: real towers with sheaves, sagging cables, stations with bullwheels and name signs, chairs / cabins / platters with riders
+    const towerMat = lam(0x6b7280), darkMat = lam(0x23272f), seatMat = lam(0x30343c), barMat = lam(0x9aa3ad);
+    const riderSlots = [];                                                             // filled below, drawn as instanced people
     V.lifts = L.map(l => {
       const grp = new T3.Group(); scene.add(grp);
-      const dx = l.x1 - l.x0, dz = l.z1 - l.z0, ang = Math.atan2(dx, dz), nT = Math.max(2, Math.round(l.len / 55));
-      const towerH = l.type === "platter" ? 5 : l.type === "gondola" ? 13 : 10;
-      const path = []; for (let i = 0; i <= nT; i++) { const k2 = i / nT, x = l.x0 + dx * k2, z = l.z0 + dz * k2; path.push([x, height(x, z) + towerH, z]); }
-      l.path = path; l.towerH = towerH;
-      path.forEach(([x, y, z], i) => {
-        if (i === 0 || i === nT) { const term = mesh(new T3.BoxGeometry(9, 5, 12), lam(0x8a2b2b), true, true); term.position.set(x, height(x, z) + 2.5, z); term.rotation.y = ang; grp.add(term);
-          const roof = mesh(new T3.BoxGeometry(10, 0.8, 13), lam(0x3b3f48), true); roof.position.set(x, height(x, z) + 5.4, z); roof.rotation.y = ang; grp.add(roof); return; }
-        const tw = mesh(new T3.CylinderGeometry(0.35, 0.5, towerH, 6), lam(0x6b7280), true); tw.position.set(x, y - towerH / 2, z); grp.add(tw);
-        const arm = mesh(new T3.BoxGeometry(5, 0.4, 0.4), lam(0x6b7280), true); arm.position.set(x, y, z); arm.rotation.y = ang + Math.PI / 2; grp.add(arm);
-      });
-      for (const side of [-1.8, 1.8]) {
-        const pts = path.map(([x, y, z]) => new T3.Vector3(x + Math.cos(ang) * side, y, z - Math.sin(ang) * side));
-        grp.add(new T3.Line(new T3.BufferGeometry().setFromPoints(pts), new T3.LineBasicMaterial({ color: 0x222222 })));
+      const dx = l.x1 - l.x0, dz = l.z1 - l.z0, ang = Math.atan2(dx, dz);
+      if (height(l.x1, l.z1) < height(l.x0, l.z0)) { [l.x0, l.x1, l.z0, l.z1] = [l.x1, l.x0, l.z1, l.z0]; }
+      l.ang = Math.atan2(l.x1 - l.x0, l.z1 - l.z0); l.perp = [Math.cos(l.ang), -Math.sin(l.ang)];
+      const info = LIFT_INFO[l.type], gondola = l.type === "gondola";
+      // sign at the bottom station: name and kind of lift
+      const lsg = liftSign(l.name, info[0]); lsg.position.set(l.x0 - Math.sin(l.ang) * 9 + l.perp[0] * 7, height(l.x0, l.z0) + (l.type === "carpet" ? 4.5 : 9), l.z0 - Math.cos(l.ang) * 9 + l.perp[1] * 7); grp.add(lsg);
+      if (l.type === "carpet") {                                                     // a conveyor belt on the snow
+        const n = Math.max(2, Math.ceil(l.len / 3)); l.path = [];
+        for (let i = 0; i <= n; i++) { const k = i / n, x = lerp(l.x0, l.x1, k), z = lerp(l.z0, l.z1, k); l.path.push([x, height(x, z) + 0.12, z]); }
+        for (let i = 0; i < n; i++) { const [x0, y0, z0] = l.path[i], [x1, y1, z1] = l.path[i + 1], len = Math.hypot(x1 - x0, z1 - z0);
+          const belt = mesh(new T3.BoxGeometry(1.1, 0.12, len + 0.05), darkMat, false, true); belt.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); belt.rotation.order = "YXZ"; belt.rotation.y = l.ang; belt.rotation.x = -Math.atan2(y1 - y0, len); grp.add(belt);
+          for (const sd of [-0.75, 0.75]) { const rail = mesh(new T3.BoxGeometry(0.08, 0.5, len + 0.05), lam(0xc9d1db)); rail.position.set((x0 + x1) / 2 + l.perp[0] * sd, (y0 + y1) / 2 + 0.3, (z0 + z1) / 2 + l.perp[1] * sd); rail.rotation.copy(belt.rotation); grp.add(rail); } }
+        const hut = mesh(new T3.BoxGeometry(2, 2.2, 2), lam(0x8a2b2b), true); hut.position.set(l.x0 + l.perp[0] * 2.2, height(l.x0, l.z0) + 1.1, l.z0 + l.perp[1] * 2.2); grp.add(hut);
+        l.towerH = 0; l.sag = 0; l.gauge = 0; return { l, grp, carpet: true };
       }
-      const gondola = l.type === "gondola", n = Math.max(6, Math.round(l.len * 2 / (gondola ? 45 : 32)));
-      const cabGeo = gondola ? new T3.BoxGeometry(2, 2.2, 2) : l.type === "platter" ? new T3.CylinderGeometry(0.35, 0.35, 0.1, 10) : new T3.BoxGeometry(l.type === "six" ? 3.6 : l.type === "triple" ? 2 : 2.6, 0.25, 0.8);
-      const cabMat = lam(gondola ? 0xd4372c : l.type === "chondola" ? 0x2a2f3a : 0x2a2f3a);
-      const inst = new T3.InstancedMesh(cabGeo, cabMat, n); inst.castShadow = true; grp.add(inst);
-      return { l, grp, inst, n, ang, gondola };
+      const towerH = l.type === "platter" ? 5 : gondola ? 14 : l.type === "chondola" ? 13 : 11;
+      l.gauge = gondola || l.type === "chondola" ? 5.6 : l.type === "six" ? 5.2 : l.type === "platter" ? 2.4 : 4.4;
+      const nT = Math.max(2, Math.round(l.len / 55)); l.path = [];
+      for (let i = 0; i <= nT; i++) { const k = i / nT, x = lerp(l.x0, l.x1, k), z = lerp(l.z0, l.z1, k); l.path.push([x, height(x, z) + (i === 0 || i === nT ? 6.5 : towerH), z]); }
+      l.towerH = towerH; l.sag = Math.min(2.2, (l.len / nT) * 0.02);
+      // like real lifts: taller towers wherever the snow bulges up, so chairs stay well above it
+      const hangReq = (gondola ? 4.6 : l.type === "platter" ? 3.8 : 3.3) + (l.type === "platter" ? 0.3 : 4);
+      l.gauge = l.gauge || 0;
+      for (let it = 0; it < 6; it++) {
+        let fixed = true;
+        for (let i = 0; i < nT; i++) for (let k2 = 1; k2 < 12; k2++) {
+          const u = k2 / 12, p0 = l.path[i], p1 = l.path[i + 1], x = lerp(p0[0], p1[0], u), z = lerp(p0[2], p1[2], u);
+          const cy = lerp(p0[1], p1[1], u) - l.sag * 4 * u * (1 - u), need = height(x, z) + hangReq - cy;
+          if (need > 0.05) { fixed = false; if (i > 0) p0[1] += need * (1 - u) + 0.3; if (i + 1 < nT) p1[1] += need * u + 0.3; if (i === 0 && i + 1 === nT) { p0[1] += need; p1[1] += need; } }
+        }
+        if (fixed) break;
+      }
+      // towers with a crossarm and sheave trains
+      l.path.forEach(([x, y, z], i) => {
+        if (i === 0 || i === nT) return;
+        const g0 = height(x, z), tw = mesh(new T3.CylinderGeometry(0.3, 0.55, y - g0, 8), towerMat, true); tw.position.set(x, (y + g0) / 2 - 0.2, z); grp.add(tw);
+        const arm = mesh(new T3.BoxGeometry(l.gauge + 1.2, 0.35, 0.35), towerMat, true); arm.position.set(x, y + 0.5, z); arm.rotation.y = l.ang + Math.PI / 2; grp.add(arm);
+        for (const sd of [-1, 1]) { const sh = mesh(new T3.BoxGeometry(0.25, 0.3, 2.2), darkMat, true); sh.position.set(x + l.perp[0] * sd * l.gauge / 2, y + 0.15, z + l.perp[1] * sd * l.gauge / 2); sh.rotation.y = l.ang; grp.add(sh); }
+      });
+      // stations at both ends, with a bullwheel the cable wraps around
+      l.wheels = [];
+      for (const [x, z, top] of [[l.x0, l.z0, false], [l.x1, l.z1, true]]) {
+        const g0 = height(x, z), bx = x - Math.sin(l.ang) * (top ? -3 : 3), bz = z - Math.cos(l.ang) * (top ? -3 : 3);
+        const hall = mesh(new T3.BoxGeometry(l.gauge + 3, 4.2, 10), lam(gondola ? 0x7a3328 : 0x3b4452), true, true); hall.position.set(bx, g0 + 2.1, bz); hall.rotation.y = l.ang; grp.add(hall);
+        const roof = mesh(new T3.BoxGeometry(l.gauge + 4, 0.6, 11), lam(0x8a2b2b), true); roof.position.set(bx, g0 + 7.4, bz); roof.rotation.y = l.ang; grp.add(roof);
+        for (const sd of [-1, 1]) { const post = mesh(new T3.CylinderGeometry(0.25, 0.3, 7.2, 6), towerMat); post.position.set(bx + l.perp[0] * sd * (l.gauge / 2 + 1), g0 + 3.6, bz + l.perp[1] * sd * (l.gauge / 2 + 1)); grp.add(post); }
+        const wheel = mesh(new T3.TorusGeometry(l.gauge / 2, 0.18, 6, 28), darkMat, true); wheel.rotation.x = Math.PI / 2; wheel.position.set(x + Math.sin(l.ang) * (top ? 1.5 : -1.5), g0 + 6.5, z + Math.cos(l.ang) * (top ? 1.5 : -1.5)); grp.add(wheel); l.wheels.push(wheel);
+      }
+      // cables (up and down side), sagging between towers
+      for (const side of [-1, 1]) {
+        const pts = []; for (let i = 0; i <= nT * 8; i++) { const c = cableAt(l, i / (nT * 8), side); pts.push(new T3.Vector3(c[0], c[1], c[2])); }
+        grp.add(new T3.Line(new T3.BufferGeometry().setFromPoints(pts), new T3.LineBasicMaterial({ color: 0x1a1a1a })));
+      }
+      // carriers
+      const spacing = gondola ? 42 : l.type === "platter" ? 16 : l.type === "chondola" ? 30 : 26, n = Math.max(6, Math.round(l.len * 2 / spacing));
+      const seats = info[1], W = seats === 6 ? 3.3 : seats === 4 ? 2.3 : 1.8, hang = gondola ? 2.6 : l.type === "platter" ? 3.8 : 2.7;
+      const parts = [];
+      const part = (geo, mat, off) => { const im = new T3.InstancedMesh(geo, mat, n); im.castShadow = true; grp.add(im); parts.push({ im, off }); return im; };
+      const offM = (x, y, z) => new T3.Matrix4().makeTranslation(x, y, z);
+      const cabinEvery = l.type === "chondola" ? 5 : 0;
+      if (l.type === "platter") {
+        part(new T3.CylinderGeometry(0.035, 0.035, hang, 5), barMat, offM(0, -hang / 2, 0));
+        part(new T3.CylinderGeometry(0.16, 0.16, 0.05, 12), lam(0xff8a1f), offM(0, -hang, 0));
+      } else {
+        part(new T3.BoxGeometry(0.09, hang, 0.09), barMat, offM(0, -hang / 2, -0.2));
+        if (!gondola) {
+          part(new T3.BoxGeometry(W, 0.1, 0.55), seatMat, offM(0, -hang, 0.05));
+          part(new T3.BoxGeometry(W, 0.65, 0.08), seatMat, offM(0, -hang + 0.38, -0.25));
+          part(new T3.BoxGeometry(W, 0.05, 0.05), barMat, offM(0, -hang + 0.55, 0.5));
+        }
+        if (gondola || cabinEvery) {
+          part(new T3.BoxGeometry(1.8, 1.9, 1.8), lam(0xd4372c), offM(0, -hang - 0.95, 0));
+          part(new T3.BoxGeometry(1.84, 0.6, 1.84), new T3.MeshLambertMaterial({ color: lin(0x1d2a3a) }), offM(0, -hang - 0.6, 0));
+          part(new T3.BoxGeometry(1.5, 0.15, 1.5), lam(0x30343c), offM(0, -hang + 0.08, 0));
+        }
+      }
+      // who's riding: people on most seats going up, a few coming down
+      const occ = [];
+      for (let i = 0; i < n; i++) { const list = [];
+        if (!gondola && l.type !== "platter" && !(cabinEvery && i % cabinEvery === 0)) for (let s2 = 0; s2 < seats; s2++) if (Math.random() < 0.6) list.push(s2);
+        occ.push(list); for (const s2 of list) riderSlots.push({ lift: l, i, seat: (s2 + 0.5) / seats * W - W / 2, hang, down: Math.random() < 0.12, color: JACKETS[(Math.random() * JACKETS.length) | 0] }); }
+      return { l, grp, parts, n, hang, gondola, cabinEvery, occ, W };
     });
+    // instanced riders on the chairs (body + head)
+    V.riderSlots = riderSlots;
+    V.riderBody = new T3.InstancedMesh(new T3.CylinderGeometry(0.21, 0.24, 0.8, 8), new T3.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, riderSlots.length));
+    V.riderHead = new T3.InstancedMesh(new T3.SphereGeometry(0.15, 10, 8), lam(0xe0ac69), Math.max(1, riderSlots.length));
+    V.riderLegs = new T3.InstancedMesh(new T3.BoxGeometry(0.34, 0.16, 0.6), lam(0x1f2a44), Math.max(1, riderSlots.length));
+    riderSlots.forEach((r, i) => V.riderBody.setColorAt(i, new T3.Color(lin(r.color))));
+    for (const im of [V.riderBody, V.riderHead, V.riderLegs]) { im.castShadow = true; scene.add(im); }
+    // your own chair (or cabin) while you ride
+    V.myChair = new T3.Group(); scene.add(V.myChair); V.myChair.visible = false;
+    V.myCab = new T3.Group(); scene.add(V.myCab); V.myCab.visible = false;
+    const cg = (geo, mat, x, y, z, parent) => { const m = mesh(geo, mat, true); m.position.set(x, y, z); parent.add(m); return m; };
+    cg(new T3.BoxGeometry(0.09, 2.7, 0.09), barMat, 0, -1.35, -0.2, V.myChair); V.mySeat = cg(new T3.BoxGeometry(2.3, 0.1, 0.55), seatMat, 0, -2.7, 0.05, V.myChair);
+    V.myBack = cg(new T3.BoxGeometry(2.3, 0.65, 0.08), seatMat, 0, -2.32, -0.25, V.myChair); V.myBar = cg(new T3.BoxGeometry(2.3, 0.05, 0.05), barMat, 0, -2.15, 0.5, V.myChair);
+    cg(new T3.BoxGeometry(0.09, 2.6, 0.09), barMat, 0, -1.3, -0.2, V.myCab);
+    cg(new T3.BoxGeometry(1.8, 0.12, 1.8), lam(0xd4372c), 0, -4.5, 0, V.myCab); cg(new T3.BoxGeometry(1.8, 0.6, 1.8), lam(0xd4372c), 0, -2.85, 0, V.myCab);
+    const glass = new T3.MeshLambertMaterial({ color: lin(0x9fc4e8), transparent: true, opacity: 0.18, side: T3.DoubleSide, depthWrite: false });
+    cg(new T3.BoxGeometry(1.8, 1.25, 1.8), glass, 0, -3.8, 0, V.myCab);
+    // other skiers out on the runs
+    buildNPCs();
     // lodges
     for (const [name, [lx, ly], s] of LODGES) {
       const x = WX(lx), z = WZ(ly), y = height(x, z), g2 = new T3.Group(); g2.position.set(x, y, z);
@@ -626,6 +724,14 @@
     g.fillStyle = "#" + color.toString(16).padStart(6, "0"); g.font = "900 italic 42px Avenir Next, system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 256, 50, 490);
     const sp = new T3.Sprite(new T3.SpriteMaterial({ map: G.srgb(new T3.CanvasTexture(c)), depthWrite: false })); sp.scale.set(size, size * 96 / 512, 1); sp.position.y = y + 8; return sp;
   }
+  function liftSign(name, kind) {
+    const { T3 } = G, c = document.createElement("canvas"); c.width = 512; c.height = 160; const g = c.getContext("2d");
+    g.fillStyle = "#8a1f24"; g.beginPath(); g.roundRect ? g.roundRect(4, 4, 504, 152, 16) : g.rect(4, 4, 504, 152); g.fill();
+    g.strokeStyle = "#ffffff"; g.lineWidth = 5; g.stroke();
+    g.fillStyle = "#ffffff"; g.font = "900 italic 50px Avenir Next, system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(name.toUpperCase(), 256, 62, 480);
+    g.font = "700 30px Avenir Next, system-ui, sans-serif"; g.fillStyle = "#ffd9d9"; g.fillText(kind, 256, 118, 480);
+    const sp = new T3.Sprite(new T3.SpriteMaterial({ map: G.srgb(new T3.CanvasTexture(c)), depthWrite: false })); sp.scale.set(9, 9 * 160 / 512, 1); return sp;
+  }
   function sign(r) {
     const { T3 } = G, c = document.createElement("canvas"); c.width = 256; c.height = 64; const g = c.getContext("2d"), d = DIFF[r.diff];
     g.fillStyle = "#f7f3e8"; g.fillRect(0, 0, 256, 64); g.strokeStyle = "#5a3d26"; g.lineWidth = 6; g.strokeRect(3, 3, 250, 58);
@@ -636,6 +742,39 @@
     return m;
   }
 
+  // ---------- other skiers on the runs ----------
+  const NPCS = [];
+  function buildNPCs() {
+    for (let i = 0; i < 24; i++) {
+      const p = G.person(JACKETS[i % JACKETS.length], { longPants: true, pants: [0x1f2a44, 0x2b2b2b, 0x3a5a8a][i % 3], cap: JACKETS[(i * 3 + 1) % JACKETS.length] });
+      const skiG = new G.T3.BoxGeometry(0.11, 0.04, 1.7); for (const xo of [-0.12, 0.12]) { const s2 = G.mesh(skiG, G.lam(0x1a1a1a), true); s2.position.set(xo, 0.02, -0.1); p.g.add(s2); }
+      p.arm.rotation.y = 0.9; p.armIn.rotation.z = -0.9; p.g.rotation.order = "YXZ";
+      G.scene.add(p.g); const n = { p, r: null, s: 0, speed: 10, lane: 0, phase: 0 }; spawnNPC(n, true); NPCS.push(n);
+    }
+  }
+  const NPC_RUNS = () => R.filter(r => r.diff !== "p" && r.len > 120);
+  function spawnNPC(n, anywhere) {
+    const runs = NPC_RUNS(), near = runs.filter(r => Math.hypot(r.p[0][0] - sk.x, r.p[0][1] - sk.z) < 500);
+    n.r = (!anywhere && near.length && Math.random() < 0.75 ? near : runs)[(Math.random() * (near.length && !anywhere ? near.length : runs.length)) | 0] || runs[0];
+    n.s = anywhere ? Math.random() * n.r.len * 0.85 : 0; n.speed = rand(7, 13) * (n.r.diff === "g" ? 0.75 : n.r.diff === "k" || n.r.diff === "kk" ? 1.15 : 1);
+    n.lane = rand(-0.25, 0.25) * n.r.width; n.phase = rand(0, 6.28); n.turn = rand(11, 18);
+  }
+  function runPoint(r, s2) {
+    let acc = 0; for (let i = 1; i < r.p.length; i++) { const a2 = r.p[i - 1], b2 = r.p[i], sl = Math.hypot(b2[0] - a2[0], b2[1] - a2[1]);
+      if (acc + sl >= s2 || i === r.p.length - 1) { const u = clamp((s2 - acc) / sl, 0, 1); return [a2[0] + (b2[0] - a2[0]) * u, a2[1] + (b2[1] - a2[1]) * u, (b2[0] - a2[0]) / sl, (b2[1] - a2[1]) / sl]; } acc += sl; }
+    return [r.p[0][0], r.p[0][1], 0, 1];
+  }
+  function updateNPCs(dt) {
+    for (const n of NPCS) {
+      n.s += n.speed * dt; if (n.s >= n.r.len) spawnNPC(n, false);
+      const far = Math.hypot(n.p.g.position.x - sk.x, n.p.g.position.z - sk.z) > 700;
+      if (far && Math.random() < dt * 0.8) { spawnNPC(n, false); n.s = Math.random() * n.r.len * 0.6; }   // keep the slopes around you busy
+      const [x, z, tx, tz] = runPoint(n.r, n.s), w = Math.sin(n.phase + n.s / n.turn), off = n.lane + w * n.r.width * 0.28;
+      const px = x + tz * off, pz = z - tx * off, ang = Math.atan2(tx, tz) - Math.cos(n.phase + n.s / n.turn) * 0.55;
+      n.p.g.position.set(px, ground(px, pz), pz); n.p.g.rotation.y = ang + Math.PI; n.p.g.rotation.z = -Math.cos(n.phase + n.s / n.turn) * 0.35;
+      n.p.legs.forEach(lg => lg.rotation.x = -0.25); n.p.upper.rotation.x = 0.2;
+    }
+  }
   // ---------- skiing physics ----------
   // Carving: the edge angle sets a turn radius (ski sidecut), so turns follow arcs and keep speed.
   // Steer harder than the edges can hold and the skis skid, scrubbing speed. BRAKE = hockey stop.
@@ -738,12 +877,13 @@
   function rideLift(l) {
     if (!l || sk.ride) return;
     sk.ride = { l, t0: t - RIDE_TIME[l.type] * 0.04, dur: RIDE_TIME[l.type] }; sk.vx = sk.vz = 0; runTrack = null; rideUpdate(); snapCam();
-    tone("triangle", 440, 660, 0.15, 0.08); toast(`Riding ${l.name}`, 1600);
+    tone("triangle", 440, 660, 0.15, 0.08); toast(`${l.name} · ${LIFT_INFO[l.type][0]}`, 2000);
   }
   function rideUpdate() {
     const r = sk.ride, k = clamp((t - r.t0) / r.dur, 0, 1), l = r.l;
-    const x = lerp(l.x0, l.x1, k), z = lerp(l.z0, l.z1, k), y = Math.max(height(x, z) + 2, lerp(height(l.x0, l.z0) + l.towerH * 0.6, height(l.x1, l.z1) + l.towerH * 0.6, k) - 3);
-    sk.x = x; sk.z = z; sk.y = l.type === "platter" ? height(x, z) : y; sk.h = Math.atan2(l.x1 - l.x0, l.z1 - l.z0);
+    sk.h = l.ang;
+    if (l.type === "carpet" || l.type === "platter") { const x = lerp(l.x0, l.x1, k) + (l.type === "platter" ? l.perp[0] * l.gauge / 2 : 0), z = lerp(l.z0, l.z1, k) + (l.type === "platter" ? l.perp[1] * l.gauge / 2 : 0); sk.x = x; sk.z = z; sk.y = ground(x, z) + (l.type === "carpet" ? 0.2 : 0); }
+    else { const c = cableAt(l, k, 1), hang = l.type === "gondola" ? 2.6 : 2.7; sk.x = c[0]; sk.z = c[2]; sk.y = c[1] - hang - (l.type === "gondola" ? 1.85 : 0.62); r.cable = c; }
     if (k >= 1) unload(l);
   }
   function unload(l) {
@@ -782,11 +922,11 @@
     g.lineCap = g.lineJoin = "round";
     for (const r of RUNS) { g.strokeStyle = DIFF[r[1]][1]; g.lineWidth = r[1] === "p" ? 4 : 2; g.setLineDash(r[1] === "gl" ? [3, 3] : []); g.beginPath(); r[2].forEach(([x, y], i) => i ? g.lineTo(mx(x), my(y)) : g.moveTo(mx(x), my(y))); g.stroke(); }
     g.setLineDash([]);
-    for (const l of LIFTS) { g.strokeStyle = "#b3262a"; g.lineWidth = 3; g.beginPath(); g.moveTo(mx(l[2][0]), my(l[2][1])); g.lineTo(mx(l[3][0]), my(l[3][1])); g.stroke();
+    for (const l of LIFTS) { g.strokeStyle = "#b3262a"; g.lineWidth = l[1] === "carpet" ? 2 : 3; g.beginPath(); g.moveTo(mx(l[2][0]), my(l[2][1])); g.lineTo(mx(l[3][0]), my(l[3][1])); g.stroke();
       g.fillStyle = "#b3262a"; g.beginPath(); g.arc(mx(l[2][0]), my(l[2][1]), 6, 0, 7); g.fill(); }
     g.font = "800 11px system-ui"; g.textAlign = "left";
     const OFF = { "Big Springs Express Gondola": [-40, 24], "Village Express": [-108, -8], "Highlands Gondola": [10, 16], "Vista Express": [-86, -4], "Arrow Express": [10, -10], "Tahoe Zephyr Express": [12, 6], "The Big Easy": [-30, 20], "Comstock Express": [10, 14] };
-    for (const l of LIFTS) { const o2 = OFF[l[0]] || [8, 4], x = mx(l[2][0]) + o2[0], y = my(l[2][1]) + o2[1]; g.lineWidth = 3; g.strokeStyle = "rgba(255,255,255,0.9)"; g.strokeText(l[0], x, y); g.fillStyle = "#7a1418"; g.fillText(l[0], x, y); }
+    for (const l of LIFTS) { if (l[1] === "carpet") continue; const o2 = OFF[l[0]] || [8, 4], x = mx(l[2][0]) + o2[0], y = my(l[2][1]) + o2[1]; g.lineWidth = 3; g.strokeStyle = "rgba(255,255,255,0.9)"; g.strokeText(l[0], x, y); g.fillStyle = "#7a1418"; g.fillText(l[0], x, y); }
     g.font = "900 13px system-ui"; for (const [n, x, y] of [["Mt. Pluto 8,610'", 960, 350], ["The Backside", 1250, 430], ["Lookout Mountain", 1260, 860], ["Northwest Territory", 760, 1060], ["Village 6,330'", 120, 1500]]) { g.lineWidth = 4; g.strokeStyle = "rgba(255,255,255,0.9)"; g.strokeText(n, mx(x), my(y)); g.fillStyle = "#14223a"; g.fillText(n, mx(x), my(y)); }
     // you are here
     const yx = mx(sk.x / PX + X0), yy = my(sk.z / PX + Y0);
@@ -824,7 +964,7 @@
       const s = this.save, o = $("options"); o.innerHTML = "";
       o.appendChild(seg("Start at", "startSeg", [["village", "Village"], ["pluto", "Mt. Pluto"], ["zephyr", "Zephyr"], ["lookout", "Lookout"]], s.start, v => { s.start = v; this.persist(); this.renderMenu(); }));
       $("record").textContent = `Runs skied: ${skied.size} of ${RUNS.length}` + (s.topSpeed ? ` · Top speed: ${s.topSpeed} km/h` : "");
-      $("menuSub").textContent = `All ${LIFTS.length} lifts and ${RUNS.length} runs of Northstar, right where they are on the trail map. Ski anywhere, ride the lifts, and try to ski every run!`;
+      $("menuSub").textContent = `All ${LIFTS.length} lifts (chairs, gondolas, the platter and the magic carpets) and ${RUNS.length} runs of Northstar, right where they are on the trail map. Ski anywhere, ride the lifts, and try to ski every run!`;
       $("help").innerHTML = `<p><b>Ski:</b> ◀ ▶ (or A/D, arrows) put your skis on edge to carve. A gentle lean carves smooth arcs and keeps your speed; hold it hard and the skis skid and slow you down. <b>BRAKE</b> (▼ or S) = hockey stop. <b>TUCK</b> (▲ or W) = go faster, or skate on the flats. <b>JUMP</b> (Space) = ollie.</p>
         <p><b>Air:</b> hit the kickers in the terrain parks (orange runs). In the air, ◀ ▶ spins and TUCK grabs. Land facing down the hill (or backwards!) or you'll wipe out. Trees are solid!</p>
         <p><b>Lifts:</b> ski to the bottom of a lift and press <b>RIDE</b> (or E). Skip the ride with ▶▶ (or R). <b>MAP</b> (or M) shows the trail map. Tap a lift on the map to go there.</p>
@@ -882,17 +1022,43 @@
     render(dt, st) {
       if (!V.me) return;
       const { T3 } = G;
-      // chairs and cabins move along every lift
+      // carriers go up one side and down the other; bullwheels turn; riders sit on the chairs
+      const nowS = performance.now() / 1000, cm = new T3.Matrix4(), tm = new T3.Matrix4(), q = new T3.Quaternion(), one = new T3.Vector3(1, 1, 1), eu = new T3.Euler();
+      const lookFar = dist2 => dist2 < 900 * 900;
       for (const lv of V.lifts) {
-        const { l, inst, n, ang } = lv, m4 = new T3.Matrix4(), q = new T3.Quaternion().setFromEuler(new T3.Euler(0, ang, 0)), sc = new T3.Vector3(1, 1, 1);
+        if (lv.carpet) continue;
+        const { l, parts, n } = lv;
+        if (!lookFar((l.x0 - sk.x) ** 2 + (l.z0 - sk.z) ** 2) && !lookFar((l.x1 - sk.x) ** 2 + (l.z1 - sk.z) ** 2)) continue;
+        l.wheels.forEach(w => w.rotation.z = nowS * 0.6);
+        lv.mats = lv.mats || [];
         for (let i = 0; i < n; i++) {
-          let u = ((i / n) + performance.now() / 1000 / RIDE_TIME[l.type] / 2) % 1, up = u < 0.5, k = up ? u * 2 : 2 - u * 2;
-          const x = lerp(l.x0, l.x1, k) + Math.cos(ang) * (up ? 1.8 : -1.8), z = lerp(l.z0, l.z1, k) - Math.sin(ang) * (up ? 1.8 : -1.8);
-          const seg2 = k * (l.path.length - 1), a = Math.min(l.path.length - 2, Math.floor(seg2)), f = seg2 - a, y = lerp(l.path[a][1], l.path[a + 1][1], f) - (lv.gondola ? 2 : 2.4);
-          m4.compose(V.tmp.set(x, l.type === "platter" ? height(x, z) + 0.8 : y, z), q, sc); inst.setMatrixAt(i, m4);
+          const u = ((i / n) + nowS / RIDE_TIME[l.type] / 2) % 1, up = u < 0.5, k = up ? u * 2 : 2 - u * 2, c = cableAt(l, k, up ? 1 : -1);
+          lv.up = lv.up || []; lv.up[i] = up;
+          eu.set(0, up ? l.ang : l.ang + Math.PI, 0); q.setFromEuler(eu); cm.compose(V.tmp.set(c[0], c[1], c[2]), q, one); lv.mats[i] = lv.mats[i] || new T3.Matrix4(); lv.mats[i].copy(cm);
+          const cabin = lv.cabinEvery && i % lv.cabinEvery === 0;
+          parts.forEach((p, pi) => {
+            let show = true;
+            if (lv.cabinEvery) show = pi === 0 || (pi <= 3 ? !cabin : cabin);
+            tm.multiplyMatrices(cm, p.off); if (!show) tm.scale(V.tmp.set(0, 0, 0)); p.im.setMatrixAt(i, tm);
+          });
         }
-        inst.instanceMatrix.needsUpdate = true;
+        parts.forEach(p => p.im.instanceMatrix.needsUpdate = true);
       }
+      V.riderSlots.forEach((r, i) => {
+        const lv = r.lv || (r.lv = V.lifts.find(v => v.l === r.lift)), m = lv && lv.mats && lv.mats[r.i];
+        if (!m || !(lv.up[r.i] || r.down)) { tm.makeScale(0, 0, 0); V.riderBody.setMatrixAt(i, tm); V.riderHead.setMatrixAt(i, tm); V.riderLegs.setMatrixAt(i, tm); return; }
+        tm.multiplyMatrices(m, cm.makeTranslation(r.seat, -r.hang + 0.5, -0.04)); V.riderBody.setMatrixAt(i, tm);
+        tm.multiplyMatrices(m, cm.makeTranslation(r.seat, -r.hang + 1.08, -0.02)); V.riderHead.setMatrixAt(i, tm);
+        tm.multiplyMatrices(m, cm.makeTranslation(r.seat, -r.hang + 0.06, 0.32)); V.riderLegs.setMatrixAt(i, tm);
+      });
+      for (const im of [V.riderBody, V.riderHead, V.riderLegs]) im.instanceMatrix.needsUpdate = true;
+      if (V.riderBody.instanceColor) V.riderBody.instanceColor.needsUpdate = false;
+      // your chair / cabin
+      const myL = sk.ride && sk.ride.l, chairRide = myL && sk.ride.cable && myL.type !== "gondola", cabRide = myL && sk.ride.cable && myL.type === "gondola";
+      V.myChair.visible = !!chairRide; V.myCab.visible = !!cabRide;
+      for (const [grp, on] of [[V.myChair, chairRide], [V.myCab, cabRide]]) if (on) { const c = sk.ride.cable; grp.position.set(c[0], c[1], c[2]); grp.rotation.set(0, myL.ang, 0); }
+      if (chairRide) { const W = LIFT_INFO[myL.type][1] === 6 ? 3.3 : LIFT_INFO[myL.type][1] === 3 ? 1.8 : 2.3; V.mySeat.scale.x = V.myBack.scale.x = V.myBar.scale.x = W / 2.3; }
+      updateNPCs(st === "play" ? dt : 0);
       // you: lean into turns (angulation), knees bend, tuck, sit on the chair, spin in the air, fall over
       const me = V.me, spdNow = Math.hypot(sk.vx, sk.vz);
       me.g.rotation.order = "YXZ";
@@ -901,7 +1067,7 @@
       me.lean = lerp(me.lean || 0, leanWant, Math.min(1, dt * 8)); me.g.rotation.z = me.lean;
       if (sk.fallT > 0) { me.g.rotation.x = lerp(me.g.rotation.x, -1.35, Math.min(1, dt * 8)); me.g.position.y = sk.y + 0.15; }
       else me.g.rotation.x = lerp(me.g.rotation.x, 0, Math.min(1, dt * 6));
-      const crouch = sk.ride && sk.ride.l.type !== "platter" ? 0.55 : sk.air ? (sk.grabbed ? 0.6 : 0.3) : inp.tuck ? 0.42 : inp.brake ? 0.22 : 0.1 + Math.abs(sk.edge) * 0.12;
+      const crouch = sk.ride && sk.ride.cable ? 1.0 : sk.ride ? 0.1 : sk.air ? (sk.grabbed ? 0.6 : 0.3) : inp.tuck ? 0.42 : inp.brake ? 0.22 : 0.1 + Math.abs(sk.edge) * 0.12;
       me.crouch = lerp(me.crouch || 0, crouch, Math.min(1, dt * 10));
       me.legs.forEach(lg => lg.rotation.x = -me.crouch * 1.4); me.upper.rotation.x = me.crouch * 0.9; me.upper.position.y = 1.02 - me.crouch * 0.35;
       me.upper.rotation.y = sk.air ? 0 : -sk.edge * 0.25;
@@ -916,7 +1082,13 @@
       const portrait = innerHeight > innerWidth, back = sk.ride ? 11 : portrait ? 7.5 : 6.2, up = sk.ride ? 5 : portrait ? 3.4 : 2.6;
       const fov = (portrait ? 68 : 60) + (sk.ride ? 0 : Math.min(20, spdNow * 0.4));
       if (Math.abs(G.camera.fov - fov) > 0.2) { G.camera.fov = lerp(G.camera.fov, fov, Math.min(1, dt * 3)); G.camera.updateProjectionMatrix(); }
-      const want = V.tmp.set(sk.x - dx * back, 0, sk.z - dz * back); want.y = Math.max(height(want.x, want.z) + 1.8, sk.y + up);
+      let want = V.tmp.set(sk.x - dx * back, 0, sk.z - dz * back); want.y = Math.max(height(want.x, want.z) + 1.8, sk.y + up);
+      if (sk.ride && sk.ride.cable) {                                                   // sitting in the chair / cabin: over your shoulder, looking up the line
+        const gond = sk.ride.l.type === "gondola";
+        const px2 = sk.ride.l.perp[0], pz2 = sk.ride.l.perp[1];
+        want.set(sk.x - dx * (gond ? 0.6 : 3.6) + px2 * (gond ? 0 : 1.3), sk.y + (gond ? 1.75 : 3.3), sk.z - dz * (gond ? 0.6 : 3.6) + pz2 * (gond ? 0 : 1.3));
+        V.cam.copy(want); V.look.set(sk.x + dx * 30, sk.y + 2 + (sk.ride.l.path[sk.ride.l.path.length - 1][1] - sk.ride.l.path[0][1]) / Math.max(1, sk.ride.l.len) * 30, sk.z + dz * 30);
+      }
       V.cam.lerp(want, Math.min(1, dt * (sk.ride ? 4 : 5))); V.look.lerp(V.tmp.set(sk.x + dx * 8, sk.y + 0.4, sk.z + dz * 8), Math.min(1, dt * 7));
       V.cam.y = Math.max(V.cam.y, height(V.cam.x, V.cam.z) + 1.2);
       const shake = st === "play" && !sk.ride && !sk.air ? Math.min(0.05, spdNow * 0.0012 + sk.skid * 0.03) : 0;
@@ -925,7 +1097,7 @@
       if (!$("mapBox").classList.contains("hidden") && Math.random() < 0.1) drawMap();
     },
   });
-  if (DEBUG) window.__ski = { KICK, ground, get tricks() { return tricks; }, sk, inp, R, L, height, nearestRun, placeAt, rideLift, skied, WX, WZ, get runNow() { return runNow; }, get nearLift() { return nearLift; } };
+  if (DEBUG) window.__ski = { get npcsNear() { return NPCS.filter(n => Math.hypot(n.p.g.position.x - sk.x, n.p.g.position.z - sk.z) < 400).length; }, get riders() { return V.riderSlots.length; }, KICK, ground, get tricks() { return tricks; }, sk, inp, R, L, height, nearestRun, placeAt, rideLift, skied, WX, WZ, get runNow() { return runNow; }, get nearLift() { return nearLift; } };
 
   // ---------- flow buttons ----------
   $("playBtn").addEventListener("click", startGame);

@@ -2,7 +2,8 @@
 
 Every game shows its version in the bottom corner, and the hub shows its own version at the bottom of the page.
 
-## Arcade Blitz — v1.6
+## Arcade Blitz — v1.7
+- **v1.7** — Ski Northstar: all 19 lifts with real chairs and riders, other skiers on the runs
 - **v1.6** — Ski Northstar 2.0 physics; keys work with iPad keyboards in every game
 - **v1.5** — New: Ski Northstar 3D. Drift 2.0 with real driving physics
 - **v1.4** — Three new 3D games: Badminton, Baseball and Drift
@@ -19,7 +20,8 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 - **v1.1** — Keys work with iPad keyboards; buttons hand the keyboard back to the game
 - **v1.0** — First version: 3D ballpark, 4 pitch types, timing and placement batting, fielders, Home Run Derby and 3 Innings
 
-## Ski Northstar — v2.0
+## Ski Northstar — v2.1
+- **v2.1** — All 19 lifts including the 5 magic carpets; real chairs, gondola cabins, chondola and platter with riders; sagging cables, sheaves, bullwheels, taller towers over bumps; lift name signs; ride in your own chair or cabin; 24 other skiers on the runs
 - **v2.0** — New skiing physics: carving, skidding, hockey stops, real airtime off park kickers, spins and grabs, solid trees and wipeouts, ski tracks, snow spray, wind and edge sounds; keys work with iPad keyboards
 - **v1.0** — First version: Northstar's 14 lifts and 93 runs placed from the trail map, rideable lifts, trail map, runs-skied tracker
 
