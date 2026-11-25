@@ -63,7 +63,7 @@
 </style>
 </head>
 <body>
-<div id="__ver" aria-label="Badminton version 1.1" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Badminton v1.1</div>
+<div id="__ver" aria-label="Badminton version 1.2" style="position:fixed;left:max(6px,env(safe-area-inset-left));bottom:max(4px,env(safe-area-inset-bottom));z-index:99999;pointer-events:none;font:700 11px/1.2 system-ui,-apple-system,sans-serif;color:rgba(255,255,255,0.7);text-shadow:0 1px 2px rgba(0,0,0,0.85);letter-spacing:0.3px">Badminton v1.2</div>
 <canvas id="c3" tabindex="0"></canvas>
 <div id="board" class="hidden"></div>
 <div id="touch"></div>
@@ -507,20 +507,53 @@
   }
   function toScreen(x, y, z) { V.v.set(x, y, z).project(G.camera); return { x: (V.v.x + 1) / 2 * innerWidth, y: (1 - V.v.y) / 2 * innerHeight }; }
 
-  // ---------- input: point / touch to aim, tap to serve ----------
-  const ptrs = new Map();
-  function pointer(e, down) {
-    if (state !== "play") return;
-    const f = toFloor(e.clientX, e.clientY);
-    let who = 0;
-    if (GAME.save.mode === 2) { who = f.z > 0 ? 0 : 1; if (down) ptrs.set(e.pointerId, who); else if (ptrs.has(e.pointerId)) who = ptrs.get(e.pointerId); else return; }
-    else if (!down && e.pointerType !== "mouse" && !ptrs.has(e.pointerId)) return;
-    if (GAME.save.mode === 2) setAim(who, f.x, (who === 0) === (f.z < 0) ? f.z : -f.z);   // your own half mirrors onto theirs
-    else setAim(0, f.x, f.z);
-    if (down && sh.held && server === who && (GAME.save.mode === 2 || who === 0)) serveAt = Math.min(serveAt, t + 0.1);
+  // ---------- input ----------
+  // Auto-run: every touch / the mouse just aims (tap to serve).
+  // I'll run: a finger on your side runs you there, a finger on their side aims; keys run, the mouse aims.
+  const ptrs = new Map();                  // pointerId -> { who, role: "move" | "aim" }
+  let mouseAims = false;
+  const myHalf = (who, z) => (who === 0) === (z > 0);
+  function apply(who, role, f) {
+    if (role === "move") { pl[who].tx = f.x; pl[who].tz = f.z; return; }
+    if (GAME.save.mode === 2) setAim(who, f.x, myHalf(who, f.z) ? -f.z : f.z);   // your own half mirrors onto theirs
+    else setAim(who, f.x, f.z);
   }
-  canvas.addEventListener("pointerdown", e => { canvas.focus(); if (GAME.save.mode === 1) ptrs.set(e.pointerId, 0); pointer(e, true); });
-  canvas.addEventListener("pointermove", e => pointer(e, false));
+  canvas.addEventListener("pointerdown", e => {
+    canvas.focus(); if (state !== "play") return;
+    const f = toFloor(e.clientX, e.clientY), auto = GAME.save.auto, two = GAME.save.mode === 2;
+    let who = two ? (f.z > 0 ? 0 : 1) : 0, role = "aim";
+    if (!auto) {
+      const mine = [...ptrs.values()].some(v => v.who === who && v.role === "move");
+      if (two) role = mine ? "aim" : "move";
+      else if (e.pointerType === "mouse") role = mouseAims || !myHalf(0, f.z) ? "aim" : "move";
+      else role = myHalf(0, f.z) && !mine ? "move" : "aim";
+    }
+    ptrs.set(e.pointerId, { who, role });
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    if (sh.held && server === who && (two || who === 0)) serveAt = Math.min(serveAt, t + 0.1);
+    apply(who, role, f);
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (state !== "play") return;
+    let v = ptrs.get(e.pointerId); const f = toFloor(e.clientX, e.clientY);
+    if (!v) { if (e.pointerType !== "mouse" || GAME.save.mode !== 1) return; v = { who: 0, role: GAME.save.auto || mouseAims || !myHalf(0, f.z) ? "aim" : "move" }; }
+    apply(v.who, v.role, f);
+  });
+  // keys: WASD / arrows run (1 player); Blue WASD + Pink arrows (2 players). Directions follow the camera.
+  function keyMove(who, dt) {
+    const k = keys, two = GAME.save.mode === 2;
+    const set = two ? (who === 0 ? ["w", "s", "a", "d"] : ["arrowup", "arrowdown", "arrowleft", "arrowright"]) : null;
+    const up = two ? k[set[0]] : (k.w || k.arrowup), dn = two ? k[set[1]] : (k.s || k.arrowdown), lf = two ? k[set[2]] : (k.a || k.arrowleft), rt = two ? k[set[3]] : (k.d || k.arrowright);
+    let sx = (rt ? 1 : 0) - (lf ? 1 : 0), sy = (up ? 1 : 0) - (dn ? 1 : 0);
+    if (!sx && !sy) return false;
+    // behind-the-player camera: up = toward the net; sideline camera: up = away from the camera
+    let mx, mz;
+    if (V.view === "side") { mx = -sy; mz = -sx; } else { mx = sx; mz = -sy; }
+    if (who === 1 && V.view !== "side") { mx = -mx; mz = -mz; }
+    const l = Math.hypot(mx, mz); pl[who].tx = pl[who].x + mx / l * 1.2; pl[who].tz = pl[who].z + mz / l * 1.2;
+    if (GAME.save.mode === 1 && !mouseAims) mouseAims = true;
+    return true;
+  }
   const lift = e => ptrs.delete(e.pointerId); canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift);
 
   // ---------- pose the 3D players ----------
@@ -546,19 +579,20 @@
 
   Object.assign(GAME, {
     saveKey: "badminton3d-save",
-    save: { mode: 1, diff: 1, sound: true, record: [[0, 0], [0, 0], [0, 0]] },
+    save: { mode: 1, diff: 1, auto: true, sound: true, record: [[0, 0], [0, 0], [0, 0]] },
     persist() { store.set(this.saveKey, this.save); },
-    load(d) { if (d.mode === 1 || d.mode === 2) this.save.mode = d.mode; if ([0, 1, 2].includes(d.diff)) this.save.diff = d.diff; if (typeof d.sound === "boolean") this.save.sound = d.sound; if (Array.isArray(d.record) && d.record.length === 3) this.save.record = d.record.map(r => [r[0] | 0, r[1] | 0]); },
+    load(d) { if (d.mode === 1 || d.mode === 2) this.save.mode = d.mode; if ([0, 1, 2].includes(d.diff)) this.save.diff = d.diff; if (typeof d.sound === "boolean") this.save.sound = d.sound; if (typeof d.auto === "boolean") this.save.auto = d.auto; if (Array.isArray(d.record) && d.record.length === 3) this.save.record = d.record.map(r => [r[0] | 0, r[1] | 0]); },
     init() { buildScene(); fitCamera(); placeServe(); },
     onResize() { if (V.P) fitCamera(); },
     renderMenu() {
       const s = this.save, o = $("options"); o.innerHTML = "";
       o.appendChild(seg("Players", "modeSeg", [[1, "1 Player"], [2, "2 Players"]], s.mode, v => { s.mode = v; this.persist(); this.renderMenu(); fitCamera(); }));
       if (s.mode === 1) o.appendChild(seg("Computer", "diffSeg", [[0, "Easy"], [1, "Medium"], [2, "Hard"]], s.diff, v => { s.diff = v; this.persist(); this.renderMenu(); }));
+      o.appendChild(seg("Running", "runSeg", [[true, "Auto-run"], [false, "I'll run"]], s.auto, v => { s.auto = v; this.persist(); this.renderMenu(); }));
       const r = s.record[s.diff];
       $("record").textContent = s.mode === 1 ? (r[0] + r[1] ? `Your ${AIL[s.diff].name} record: ${r[0]} wins, ${r[1]} losses` : "") : "Blue plays from the near side, Pink from the far side. Each player aims on their own half.";
-      $("menuSub").textContent = "Your player runs to the shuttle by themselves. You aim: point where you want it to land. Aim deep for a high clear, short for a drop shot, and smash the high ones! First to 11.";
-      $("help").innerHTML = `<p><b>Aim</b> where you want the shuttle to land. Your player runs and swings by themselves.</p>
+      $("menuSub").textContent = (s.auto ? "Your player runs to the shuttle by themselves. You aim: point where you want it to land." : "Run to the shuttle yourself, and aim where you want it to land. Your player swings by themselves when it's in reach.") + " Aim deep for a high clear, short for a drop shot, and smash the high ones! First to 11.";
+      $("help").innerHTML = (s.auto ? `<p><b>Aim</b> where you want the shuttle to land. Your player runs and swings by themselves.</p>` : `<p><b>Run:</b> WASD or the arrow keys, or drag on your side of the court. <b>Aim:</b> the mouse, or touch the other side (one hand runs, the other aims). Your player swings by themselves.</p><p><b>2 Players:</b> Blue WASD, Pink arrows, or your first finger runs and a second finger aims.</p>`) + `
         <p><b>Computer:</b> point the mouse. <b>iPad:</b> touch the spot. Tap or click to serve.</p>
         <p>Deep = high clear. Short = drop shot. When the shuttle comes in high, your player jumps and <b>smashes</b>. The shuttle can't touch the floor, and it must land inside the lines.</p>
         <p><b>2 Players:</b> each player touches their own half to aim. <b>P</b> pause · <b>F</b> full screen</p>`;
@@ -576,8 +610,9 @@
       const two = this.save.mode === 2, L = AIL[this.save.diff];
       for (let k = 0; k < 4; k++) {
         const h = dt / 4;
-        think(0, h, 4.3, 0.13, 0.25);
-        if (two) think(1, h, 4.3, 0.13, 0.25); else think(1, h, L.speed, L.late, L.err * 0.25);
+        const auto = this.save.auto;
+        if (auto) think(0, h, 4.3, 0.13, 0.25); else { const held = [...ptrs.values()].some(v => v.who === 0 && v.role === "move"); if (!keyMove(0, h) && !held && !sh.held) { /* stay where you are */ } move(pl[0], 0, h, 4.6); }
+        if (two) { if (auto) think(1, h, 4.3, 0.13, 0.25); else { keyMove(1, h); move(pl[1], 1, h, 4.6); } } else think(1, h, L.speed, L.late, L.err * 0.25);
         if (!sh.held) {
           const pz = sh.z; step(sh, h);
           if (sh.live && pz * sh.z < 0 && sh.y < NET_H && Math.abs(sh.x) < DHW + 0.1) { sh.z = -Math.sign(sh.vz) * 0.05; sh.vz *= -0.15; sh.vx *= 0.3; noise("lowpass", 600, 200, 0.12, 0.2); }
@@ -619,7 +654,7 @@
       V.outX.visible = oa > 0; if (oa > 0) { V.outX.position.set(om.x, 0.012, om.z); V.outX.children.forEach(c => c.material.opacity = oa); }
     },
   });
-  if (DEBUG) window.__bd = { sh, pl, aim, score: () => score, toScreen, toFloor, simulate, solve, step };
+  if (DEBUG) window.__bd = { predict, ptrs, sh, pl, aim, score: () => score, toScreen, toFloor, simulate, solve, step };
 
   // ---------- flow buttons ----------
   $("playBtn").addEventListener("click", startGame);

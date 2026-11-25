@@ -2,7 +2,8 @@
 
 Every game shows its version in the bottom corner, and the hub shows its own version at the bottom of the page.
 
-## Arcade Blitz — v1.7
+## Arcade Blitz — v1.8
+- **v1.8** — Badminton: run yourself (I'll run) option, like Tennis
 - **v1.7** — Ski Northstar: all 19 lifts with real chairs and riders, other skiers on the runs
 - **v1.6** — Ski Northstar 2.0 physics; keys work with iPad keyboards in every game
 - **v1.5** — New: Ski Northstar 3D. Drift 2.0 with real driving physics
@@ -12,7 +13,8 @@ Every game shows its version in the bottom corner, and the hub shows its own ver
 - **v1.1** — Installable app (Add to Home Screen), offline play, hosted on Vercel
 - **v1.0** — Arcade Blitz home page with an idea box
 
-## Badminton — v1.1
+## Badminton — v1.2
+- **v1.2** — Running option: Auto-run or I'll run (keys, or drag on your side; the mouse or a second finger aims)
 - **v1.1** — Keys work with iPad keyboards; buttons hand the keyboard back to the game
 - **v1.0** — First version: 3D hall, real shuttlecock flight, clears, drops and jump smashes, computer or 2 players
 
